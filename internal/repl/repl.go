@@ -282,6 +282,7 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		promptText := replacePaneRefs(strings.Join(fields[1:], " "))
+		promptText = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: " + promptText
 		reply, err := client.SendPrompt(promptText)
 		if err != nil {
 			fmt.Println("openai error:", err)

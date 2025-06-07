@@ -47,7 +47,7 @@ func (c *Client) SendPrompt(prompt string) (string, error) {
 		apiURL = env
 	}
 	reqBody := chatRequest{
-		Model:    "gpt-3.5-turbo",
+		Model:    "gpt-4o",
 		Messages: []chatMessage{{Role: "user", Content: prompt}},
 	}
 	b, err := json.Marshal(reqBody)
