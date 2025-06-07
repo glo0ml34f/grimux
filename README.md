@@ -14,6 +14,7 @@ go build ./cmd/grimux
 ./grimux -capture <pane-id>
 ```
 If `<pane-id>` is omitted, the current pane is captured.
+Pass `-verbose` to see detailed tmux communication logs.
 
 ## Finding pane IDs 🆔
 You can discover the ID of each pane with `tmux list-panes -F '#{pane_id} #{pane_title}'`. The `#{pane_id}` values (like `%1`, `%2` ...) can then be passed to `-capture`.
@@ -42,3 +43,9 @@ tmux list-panes -F '#{pane_id} #{pane_current_command}'
 ./grimux -capture %1
 ```
    You should see the contents displayed in the `grimux` pane.
+
+## Running tests 🧪
+Unit tests can be executed with:
+```bash
+go test ./...
+```
