@@ -1,13 +1,12 @@
 package tmux
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -35,44 +34,16 @@ func CapturePane(target string) (string, error) {
 		return "", fmt.Errorf("tmux socket missing: %w", err)
 	}
 
-	conn, err := net.Dial("unix", socket)
-	if err != nil {
-		return "", fmt.Errorf("connect tmux socket: %w", err)
-	}
-	defer conn.Close()
-
-	cmd := "capture-pane -p"
+	args := []string{"-S", socket, "capture-pane", "-p"}
 	if target != "" {
-		cmd += " -t " + target
+		args = append(args, "-t", target)
 	}
-	cmd += "\n"
-	debugf("sending command: %s", strings.TrimSpace(cmd))
-	if _, err := conn.Write([]byte(cmd)); err != nil {
-		return "", fmt.Errorf("write command: %w", err)
-	}
-
+	debugf("running: tmux %s", strings.Join(args, " "))
+	cmd := exec.Command("tmux", args...)
 	var buf bytes.Buffer
-	scanner := bufio.NewScanner(conn)
-	parsing := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "%begin"):
-			parsing = true
-			continue
-		case strings.HasPrefix(line, "%end"):
-			debugf("capture complete")
-			return buf.String(), nil
-		}
-		if parsing {
-			debugf("recv: %s", line)
-			buf.WriteString(line)
-			buf.WriteByte('\n')
-		}
+	cmd.Stdout = &buf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("tmux command: %w", err)
 	}
-	if err := scanner.Err(); err != nil {
-		debugf("scan error: %v", err)
-		return "", err
-	}
-	return "", errors.New("unexpected end of stream")
+	return buf.String(), nil
 }

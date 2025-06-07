@@ -1,51 +1,43 @@
 package tmux
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func startFakeTmux(t *testing.T, expected string, lines []string) (string, func()) {
+// startFakeTmux creates a fake "tmux" binary in a temporary directory. The
+// binary records its arguments to argsFile and prints the provided output.
+// It returns the path to a fake socket, the args file and a cleanup function.
+func startFakeTmux(t *testing.T, output string) (sock string, argsFile string, cleanup func()) {
 	t.Helper()
 	tmp := t.TempDir()
-	sock := filepath.Join(tmp, "tmux.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
+
+	sock = filepath.Join(tmp, "tmux.sock")
+	if err := os.WriteFile(sock, nil, 0600); err != nil {
+		t.Fatalf("create fake socket: %v", err)
 	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		r := bufio.NewReader(conn)
-		cmd, _ := r.ReadString('\n')
-		if cmd != expected {
-			t.Errorf("unexpected command: %q", cmd)
-		}
-		for _, line := range lines {
-			fmt.Fprintln(conn, line)
-		}
-	}()
-	cleanup := func() {
-		ln.Close()
-		<-done
+
+	argsFile = filepath.Join(tmp, "args")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" > %s\ncat <<'EOF'\n%sEOF\n", argsFile, output)
+	bin := filepath.Join(tmp, "tmux")
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatalf("write script: %v", err)
 	}
-	return sock, cleanup
+
+	oldPath := os.Getenv("PATH")
+	os.Setenv("PATH", tmp+string(os.PathListSeparator)+oldPath)
+	cleanup = func() { os.Setenv("PATH", oldPath) }
+	return sock, argsFile, cleanup
 }
 
 func TestCapturePaneWithTarget(t *testing.T) {
-	expected := "capture-pane -p -t %1\n"
-	sock, cleanup := startFakeTmux(t, expected, []string{"%begin", "hello", "%end"})
+	sock, argsFile, cleanup := startFakeTmux(t, "hello\n")
 	defer cleanup()
 	os.Setenv("TMUX", sock+",session")
+
 	got, err := CapturePane("%1")
 	if err != nil {
 		t.Fatalf("CapturePane: %v", err)
@@ -53,18 +45,38 @@ func TestCapturePaneWithTarget(t *testing.T) {
 	if got != "hello\n" {
 		t.Fatalf("unexpected output: %q", got)
 	}
+
+	b, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	args := string(bytes.TrimSpace(b))
+	expected := fmt.Sprintf("-S %s capture-pane -p -t %s", sock, "%1")
+	if args != expected {
+		t.Fatalf("unexpected args: %q", args)
+	}
 }
 
 func TestCapturePaneCurrent(t *testing.T) {
-	expected := "capture-pane -p\n"
-	sock, cleanup := startFakeTmux(t, expected, []string{"%begin", "hi", "%end"})
+	sock, argsFile, cleanup := startFakeTmux(t, "hi\n")
 	defer cleanup()
 	os.Setenv("TMUX", sock+",session")
+
 	got, err := CapturePane("")
 	if err != nil {
 		t.Fatalf("CapturePane: %v", err)
 	}
 	if got != "hi\n" {
 		t.Fatalf("unexpected output: %q", got)
+	}
+
+	b, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	args := string(bytes.TrimSpace(b))
+	expected := fmt.Sprintf("-S %s capture-pane -p", sock)
+	if args != expected {
+		t.Fatalf("unexpected args: %q", args)
 	}
 }
