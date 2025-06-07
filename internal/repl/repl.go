@@ -6,10 +6,32 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"github.com/example/grimux/internal/tmux"
 )
+
+var capturePane = tmux.CapturePane
+
+var panePattern = regexp.MustCompile(`/\{%(\d+)\}/`)
+
+func replacePaneRefs(text string) string {
+	return panePattern.ReplaceAllStringFunc(text, func(tok string) string {
+		m := panePattern.FindStringSubmatch(tok)
+		if len(m) < 2 {
+			return tok
+		}
+		id := "%" + m[1]
+		content, err := capturePane(id)
+		if err != nil {
+			return fmt.Sprintf("[capture error: %v]", err)
+		}
+		return "```\n" + content + "```"
+	})
+}
 
 // startRaw puts the terminal into raw mode.
 func startRaw() (*syscall.Termios, error) {
@@ -113,6 +135,9 @@ func Run() error {
 				if handleCommand(line) {
 					return nil
 				}
+				history = append(history, line)
+			} else {
+				fmt.Println(replacePaneRefs(line))
 				history = append(history, line)
 			}
 			prompt()
