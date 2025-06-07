@@ -299,7 +299,7 @@ func handleCommand(cmd string) bool {
 			fmt.Println("openai error:", err)
 			return false
 		}
-		cmd := exec.Command("batcat")
+		cmd := exec.Command("batcat", "-l", "markdown")
 		cmd.Stdin = strings.NewReader(reply)
 		cmd.Stdout = os.Stdout
 		if err := cmd.Run(); err != nil {
