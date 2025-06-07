@@ -69,6 +69,7 @@ func Run() error {
 
 	reader := bufio.NewReader(os.Stdin)
 	history := []string{}
+	histIdx := 0
 	lineBuf := bytes.Buffer{}
 
 	prompt := func() {
@@ -79,16 +80,33 @@ func Run() error {
 		fmt.Print("\033[H\033[2J")
 	}
 
-	autocomplete := func(prefix string) {
-		cmds := []string{"!capture", "!list", "!quit"}
+	printLine := func() {
+		fmt.Print("\r\033[K")
+		prompt()
+		fmt.Print(lineBuf.String())
+	}
+
+	autocomplete := func() {
+		prefix := lineBuf.String()
+		cmds := []string{"!capture", "!list", "!quit", "!ask"}
+		matches := []string{}
 		for _, c := range cmds {
 			if strings.HasPrefix(c, prefix) {
-				fmt.Println()
-				fmt.Println(c)
+				matches = append(matches, c)
 			}
 		}
-		prompt()
-		fmt.Print(prefix)
+		if len(matches) == 0 {
+			return
+		}
+		if len(matches) == 1 {
+			lineBuf.Reset()
+			lineBuf.WriteString(matches[0])
+			printLine()
+			return
+		}
+		fmt.Println()
+		fmt.Println(strings.Join(matches, "  "))
+		printLine()
 	}
 
 	reverseSearch := func() {
@@ -107,10 +125,13 @@ func Run() error {
 		for i := len(history) - 1; i >= 0; i-- {
 			if strings.Contains(history[i], query) {
 				fmt.Printf("\n%s\n", history[i])
+				lineBuf.Reset()
+				lineBuf.WriteString(history[i])
+				histIdx = i
 				break
 			}
 		}
-		prompt()
+		printLine()
 	}
 
 	prompt()
@@ -138,9 +159,11 @@ func Run() error {
 					return nil
 				}
 				history = append(history, line)
+				histIdx = len(history)
 			} else {
 				fmt.Println(replacePaneRefs(line))
 				history = append(history, line)
+				histIdx = len(history)
 			}
 			prompt()
 		case 12: // Ctrl+L
@@ -157,9 +180,41 @@ func Run() error {
 				fmt.Print("\b \b")
 			}
 		case 9: // Tab
-			autocomplete(lineBuf.String())
+			autocomplete()
 		case 18: // Ctrl+R reverse search
 			reverseSearch()
+		case 27: // escape sequences (arrows)
+			next1, _, err := reader.ReadRune()
+			if err != nil {
+				return err
+			}
+			if next1 != '[' {
+				continue
+			}
+			next2, _, err := reader.ReadRune()
+			if err != nil {
+				return err
+			}
+			switch next2 {
+			case 'A': // Up arrow
+				if histIdx > 0 {
+					histIdx--
+					lineBuf.Reset()
+					lineBuf.WriteString(history[histIdx])
+					printLine()
+				}
+			case 'B': // Down arrow
+				if histIdx < len(history)-1 {
+					histIdx++
+					lineBuf.Reset()
+					lineBuf.WriteString(history[histIdx])
+					printLine()
+				} else if histIdx == len(history)-1 {
+					histIdx = len(history)
+					lineBuf.Reset()
+					printLine()
+				}
+			}
 		default:
 			lineBuf.WriteRune(r)
 			fmt.Printf("%c", r)
