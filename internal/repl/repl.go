@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/example/grimux/internal/openai"
 	"github.com/example/grimux/internal/tmux"
 )
 
@@ -29,7 +30,8 @@ func replacePaneRefs(text string) string {
 		if err != nil {
 			return fmt.Sprintf("[capture error: %v]", err)
 		}
-		return "\n```\n" + content + "```\n"
+		content = strings.TrimSpace(content)
+		return "\n```\n" + content + "\n```\n"
 	})
 }
 
@@ -186,6 +188,23 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		fmt.Print(string(out))
+	case "!ask":
+		if len(fields) < 2 {
+			fmt.Println("usage: !ask <prompt>")
+			return false
+		}
+		client, err := openai.NewClient()
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		promptText := replacePaneRefs(strings.Join(fields[1:], " "))
+		reply, err := client.SendPrompt(promptText)
+		if err != nil {
+			fmt.Println("openai error:", err)
+			return false
+		}
+		fmt.Println(reply)
 	default:
 		fmt.Println("unknown command")
 	}
