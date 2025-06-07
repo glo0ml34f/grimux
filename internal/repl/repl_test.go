@@ -34,3 +34,20 @@ func TestReplacePaneRefsError(t *testing.T) {
 		t.Fatalf("unexpected error output: %q", got)
 	}
 }
+
+func TestReplaceBufferRefs(t *testing.T) {
+	buffers["%foo"] = "bar"
+	defer func() { delete(buffers, "%foo") }()
+	got := replaceBufferRefs("hello %foo world")
+	if got != "hello bar world" {
+		t.Fatalf("unexpected buffer replace: %q", got)
+	}
+}
+
+func TestLastCodeBlock(t *testing.T) {
+	text := "``go\nfirst\n```\ntext\n```python\nsecond\n```"
+	code := lastCodeBlock(text)
+	if code != "second" {
+		t.Fatalf("unexpected last code block: %q", code)
+	}
+}
