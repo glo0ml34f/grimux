@@ -10,7 +10,10 @@ import (
 
 func main() {
 	target := flag.String("capture", "", "tmux pane to capture")
+	verbose := flag.Bool("verbose", false, "enable verbose logging")
 	flag.Parse()
+
+	tmux.Verbose = *verbose
 
 	if *target != "" {
 		content, err := tmux.CapturePane(*target)
