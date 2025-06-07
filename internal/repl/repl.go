@@ -1,21 +1,36 @@
 package repl
 
 import (
-	"bufio"
-	"bytes"
-	"fmt"
-	"os"
-	"os/exec"
-	"regexp"
-	"strings"
-	"syscall"
-	"unsafe"
+        "bufio"
+        "bytes"
+        "fmt"
+        "math/rand"
+        "os"
+        "os/exec"
+        "regexp"
+        "strings"
+        "syscall"
+        "time"
+        "unsafe"
 
-	"github.com/example/grimux/internal/openai"
-	"github.com/example/grimux/internal/tmux"
+        "github.com/example/grimux/internal/openai"
+        "github.com/example/grimux/internal/tmux"
 )
 
 var capturePane = tmux.CapturePane
+
+const asciiArt = "\033[1;36m" + `
+  ____ ____ ____ ____ _________ ____ ____ ____ ____
+ ||g |||r |||i |||m |||       |||u |||x |||  |||  ||
+ ||__|||__|||__|||__|||_______|||__|||__|||__|||__||
+ |/__\|/__\|/__\|/__\|/_______\|/__\|/__\|/__\|/__\|
+` + "\033[0m"
+
+var prompts = []string{
+        "Give me a pithy complaint about being bothered with nonsense",
+        "Provide a short gripe about having to deal with nonsense",
+        "What's a witty moan about pointless nonsense?",
+}
 
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
@@ -67,14 +82,24 @@ func Run() error {
 	}
 	defer stopRaw(oldState)
 
-	reader := bufio.NewReader(os.Stdin)
-	history := []string{}
-	histIdx := 0
-	lineBuf := bytes.Buffer{}
+        reader := bufio.NewReader(os.Stdin)
+        history := []string{}
+        histIdx := 0
+        lineBuf := bytes.Buffer{}
 
-	prompt := func() {
-		fmt.Print("grimux> ")
-	}
+        fmt.Println(asciiArt + "\nWelcome to grimux! 💀")
+
+        rand.Seed(time.Now().UnixNano())
+        if client, err := openai.NewClient(); err == nil {
+                p := prompts[rand.Intn(len(prompts))]
+                if reply, err := client.SendPrompt(p); err == nil {
+                        fmt.Println(reply)
+                }
+        }
+
+        prompt := func() {
+                fmt.Print("\033[1;35mgrimux😈> \033[0m")
+        }
 
 	clearScreen := func() {
 		fmt.Print("\033[H\033[2J")
@@ -169,11 +194,14 @@ func Run() error {
 		case 12: // Ctrl+L
 			clearScreen()
 			prompt()
-		case 3: // Ctrl+C
-			fmt.Println()
-			return nil
-		case 127: // Backspace
-			if lineBuf.Len() > 0 {
+                case 3: // Ctrl+C
+                        fmt.Println()
+                        return nil
+                case 4: // Ctrl+D
+                        fmt.Println()
+                        return nil
+                case 127: // Backspace
+                        if lineBuf.Len() > 0 {
 				buf := lineBuf.Bytes()
 				lineBuf.Reset()
 				lineBuf.Write(buf[:len(buf)-1])
