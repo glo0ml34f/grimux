@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/example/grimux/internal/repl"
 	"github.com/example/grimux/internal/tmux"
 )
 
@@ -25,5 +26,8 @@ func main() {
 		return
 	}
 
-	flag.Usage()
+	if err := repl.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
