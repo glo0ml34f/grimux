@@ -16,7 +16,7 @@ func TestReplacePaneRefs(t *testing.T) {
 	defer func() { capturePane = old }()
 
 	got := replacePaneRefs("before /{%1}/ after")
-	expected := "before ```\nhello\n``` after"
+	expected := "before /\n```\nhello\n```\n/ after"
 	if got != expected {
 		t.Fatalf("unexpected output: %q", got)
 	}
@@ -30,7 +30,7 @@ func TestReplacePaneRefsError(t *testing.T) {
 	defer func() { capturePane = old }()
 
 	got := replacePaneRefs("/{%2}/")
-	if got != "[capture error: fail]" {
+	if got != "/[capture error: fail]/" {
 		t.Fatalf("unexpected error output: %q", got)
 	}
 }
