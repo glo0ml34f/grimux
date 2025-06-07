@@ -1,20 +1,20 @@
 package repl
 
 import (
-        "bufio"
-        "bytes"
-        "fmt"
-        "math/rand"
-        "os"
-        "os/exec"
-        "regexp"
-        "strings"
-        "syscall"
-        "time"
-        "unsafe"
+	"bufio"
+	"bytes"
+	"fmt"
+	"math/rand"
+	"os"
+	"os/exec"
+	"regexp"
+	"strings"
+	"syscall"
+	"time"
+	"unsafe"
 
-        "github.com/example/grimux/internal/openai"
-        "github.com/example/grimux/internal/tmux"
+	"github.com/example/grimux/internal/openai"
+	"github.com/example/grimux/internal/tmux"
 )
 
 var capturePane = tmux.CapturePane
@@ -27,9 +27,9 @@ const asciiArt = "\033[1;36m" + `
 ` + "\033[0m"
 
 var prompts = []string{
-        "Give me a pithy complaint about being bothered with nonsense",
-        "Provide a short gripe about having to deal with nonsense",
-        "What's a witty moan about pointless nonsense?",
+	"Give me a pithy complaint about being bothered with nonsense",
+	"Provide a short gripe about having to deal with nonsense",
+	"What's a witty moan about pointless nonsense?",
 }
 
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
@@ -82,24 +82,24 @@ func Run() error {
 	}
 	defer stopRaw(oldState)
 
-        reader := bufio.NewReader(os.Stdin)
-        history := []string{}
-        histIdx := 0
-        lineBuf := bytes.Buffer{}
+	reader := bufio.NewReader(os.Stdin)
+	history := []string{}
+	histIdx := 0
+	lineBuf := bytes.Buffer{}
 
-        fmt.Println(asciiArt + "\nWelcome to grimux! 💀")
+	fmt.Println(asciiArt + "\nWelcome to grimux! 💀")
 
-        rand.Seed(time.Now().UnixNano())
-        if client, err := openai.NewClient(); err == nil {
-                p := prompts[rand.Intn(len(prompts))]
-                if reply, err := client.SendPrompt(p); err == nil {
-                        fmt.Println(reply)
-                }
-        }
+	rand.Seed(time.Now().UnixNano())
+	if client, err := openai.NewClient(); err == nil {
+		p := prompts[rand.Intn(len(prompts))]
+		if reply, err := client.SendPrompt(p); err == nil {
+			fmt.Println(reply)
+		}
+	}
 
-        prompt := func() {
-                fmt.Print("\033[1;35mgrimux😈> \033[0m")
-        }
+	prompt := func() {
+		fmt.Print("\033[1;35mgrimux😈> \033[0m")
+	}
 
 	clearScreen := func() {
 		fmt.Print("\033[H\033[2J")
@@ -186,7 +186,18 @@ func Run() error {
 				history = append(history, line)
 				histIdx = len(history)
 			} else {
-				fmt.Println(replacePaneRefs(line))
+				client, err := openai.NewClient()
+				if err != nil {
+					fmt.Println(err)
+				} else {
+					promptText := replacePaneRefs(line)
+					reply, err := client.SendPrompt(promptText)
+					if err != nil {
+						fmt.Println("openai error:", err)
+					} else {
+						fmt.Println(reply)
+					}
+				}
 				history = append(history, line)
 				histIdx = len(history)
 			}
@@ -194,14 +205,14 @@ func Run() error {
 		case 12: // Ctrl+L
 			clearScreen()
 			prompt()
-                case 3: // Ctrl+C
-                        fmt.Println()
-                        return nil
-                case 4: // Ctrl+D
-                        fmt.Println()
-                        return nil
-                case 127: // Backspace
-                        if lineBuf.Len() > 0 {
+		case 3: // Ctrl+C
+			fmt.Println()
+			return nil
+		case 4: // Ctrl+D
+			fmt.Println()
+			return nil
+		case 127: // Backspace
+			if lineBuf.Len() > 0 {
 				buf := lineBuf.Bytes()
 				lineBuf.Reset()
 				lineBuf.Write(buf[:len(buf)-1])
@@ -288,7 +299,12 @@ func handleCommand(cmd string) bool {
 			fmt.Println("openai error:", err)
 			return false
 		}
-		fmt.Println(reply)
+		cmd := exec.Command("batcat")
+		cmd.Stdin = strings.NewReader(reply)
+		cmd.Stdout = os.Stdout
+		if err := cmd.Run(); err != nil {
+			fmt.Println("batcat error:", err)
+		}
 	default:
 		fmt.Println("unknown command")
 	}
