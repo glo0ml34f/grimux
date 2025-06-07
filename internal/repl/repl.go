@@ -16,7 +16,7 @@ import (
 
 var capturePane = tmux.CapturePane
 
-var panePattern = regexp.MustCompile(`/\{%(\d+)\}/`)
+var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
 func replacePaneRefs(text string) string {
 	return panePattern.ReplaceAllStringFunc(text, func(tok string) string {
@@ -29,7 +29,7 @@ func replacePaneRefs(text string) string {
 		if err != nil {
 			return fmt.Sprintf("[capture error: %v]", err)
 		}
-		return "```\n" + content + "```"
+		return "\n```\n" + content + "```\n"
 	})
 }
 
