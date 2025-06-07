@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -34,6 +35,13 @@ var prompts = []string{
 
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
+var bufferPattern = regexp.MustCompile(`%[a-zA-Z0-9_]+`)
+var codeBlockPattern = regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]+)\n(.*?)\n```")
+var buffers = map[string]string{
+	"%file": "",
+	"%code": "",
+}
+
 func replacePaneRefs(text string) string {
 	return panePattern.ReplaceAllStringFunc(text, func(tok string) string {
 		m := panePattern.FindStringSubmatch(tok)
@@ -48,6 +56,23 @@ func replacePaneRefs(text string) string {
 		content = strings.TrimSpace(content)
 		return "\n```\n" + content + "\n```\n"
 	})
+}
+
+func replaceBufferRefs(text string) string {
+	return bufferPattern.ReplaceAllStringFunc(text, func(tok string) string {
+		if val, ok := buffers[tok]; ok {
+			return val
+		}
+		return tok
+	})
+}
+
+func lastCodeBlock(text string) string {
+	matches := codeBlockPattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1][2]
 }
 
 // startRaw puts the terminal into raw mode.
@@ -113,7 +138,27 @@ func Run() error {
 
 	autocomplete := func() {
 		prefix := lineBuf.String()
-		cmds := []string{"!capture", "!list", "!quit", "!ask"}
+		fields := strings.Fields(prefix)
+		if len(fields) > 0 && (fields[0] == "!save" || fields[0] == "!file") {
+			if len(fields) >= 2 && !strings.HasSuffix(prefix, " ") {
+				pattern := fields[len(fields)-1] + "*"
+				matches, _ := filepath.Glob(pattern)
+				if len(matches) == 1 {
+					fields[len(fields)-1] = matches[0]
+					lineBuf.Reset()
+					lineBuf.WriteString(strings.Join(fields, " "))
+					printLine()
+					return
+				}
+				if len(matches) > 1 {
+					fmt.Println()
+					fmt.Println(strings.Join(matches, "  "))
+					printLine()
+					return
+				}
+			}
+		}
+		cmds := []string{"!capture", "!list", "!quit", "!ask", "!save", "!var", "!file", "!edit", "!run"}
 		matches := []string{}
 		for _, c := range cmds {
 			if strings.HasPrefix(c, prefix) {
@@ -190,12 +235,13 @@ func Run() error {
 				if err != nil {
 					fmt.Println(err)
 				} else {
-					promptText := replacePaneRefs(line)
+					promptText := replaceBufferRefs(replacePaneRefs(line))
 					reply, err := client.SendPrompt(promptText)
 					if err != nil {
 						fmt.Println("openai error:", err)
 					} else {
 						fmt.Println(reply)
+						buffers["%code"] = lastCodeBlock(reply)
 					}
 				}
 				history = append(history, line)
@@ -282,6 +328,93 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		fmt.Print(string(out))
+	case "!save":
+		if len(fields) < 3 {
+			fmt.Println("usage: !save <buffer> <file>")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			fmt.Println("unknown buffer")
+			return false
+		}
+		if err := os.WriteFile(fields[2], []byte(data), 0644); err != nil {
+			fmt.Println("save error:", err)
+		}
+	case "!file":
+		if len(fields) < 2 {
+			fmt.Println("usage: !file <path>")
+			return false
+		}
+		b, err := os.ReadFile(fields[1])
+		if err != nil {
+			fmt.Println("file error:", err)
+			return false
+		}
+		buffers["%file"] = string(b)
+	case "!edit":
+		if len(fields) < 2 {
+			fmt.Println("usage: !edit <buffer>")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			fmt.Println("unknown buffer")
+			return false
+		}
+		tmp, err := os.CreateTemp("", "grimux-edit-*.tmp")
+		if err != nil {
+			fmt.Println("tempfile error:", err)
+			return false
+		}
+		if _, err := tmp.WriteString(data); err != nil {
+			fmt.Println("write temp error:", err)
+			return false
+		}
+		tmp.Close()
+		cmd := exec.Command("vim", tmp.Name())
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Println("vim error:", err)
+		}
+		if b, err := os.ReadFile(tmp.Name()); err == nil {
+			buffers[fields[1]] = string(b)
+		}
+		os.Remove(tmp.Name())
+	case "!run":
+		if len(fields) < 2 {
+			fmt.Println("usage: !run <command>")
+			return false
+		}
+		cmdStr := replaceBufferRefs(strings.Join(fields[1:], " "))
+		c := exec.Command("sh", "-c", cmdStr)
+		var out bytes.Buffer
+		c.Stdout = &out
+		c.Stderr = &out
+		if err := c.Run(); err != nil {
+			fmt.Println("run error:", err)
+		}
+		fmt.Print(out.String())
+	case "!var":
+		if len(fields) < 3 {
+			fmt.Println("usage: !var <buffer> <prompt>")
+			return false
+		}
+		client, err := openai.NewClient()
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		promptText := replaceBufferRefs(replacePaneRefs(strings.Join(fields[2:], " ")))
+		reply, err := client.SendPrompt(promptText)
+		if err != nil {
+			fmt.Println("openai error:", err)
+			return false
+		}
+		buffers[fields[1]] = lastCodeBlock(reply)
+		fmt.Println(reply)
 	case "!ask":
 		if len(fields) < 2 {
 			fmt.Println("usage: !ask <prompt>")
@@ -292,7 +425,7 @@ func handleCommand(cmd string) bool {
 			fmt.Println(err)
 			return false
 		}
-		promptText := replacePaneRefs(strings.Join(fields[1:], " "))
+		promptText := replaceBufferRefs(replacePaneRefs(strings.Join(fields[1:], " ")))
 		promptText = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: " + promptText
 		reply, err := client.SendPrompt(promptText)
 		if err != nil {
@@ -305,6 +438,7 @@ func handleCommand(cmd string) bool {
 		if err := cmd.Run(); err != nil {
 			fmt.Println("batcat error:", err)
 		}
+		buffers["%code"] = lastCodeBlock(reply)
 	default:
 		fmt.Println("unknown command")
 	}
