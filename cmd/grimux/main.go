@@ -6,24 +6,21 @@ import (
 	"os"
 
 	"github.com/example/grimux/internal/repl"
-	"github.com/example/grimux/internal/tmux"
 )
 
+var version = "dev"
+
 func main() {
-	target := flag.String("capture", "", "tmux pane to capture")
-	verbose := flag.Bool("verbose", false, "enable verbose logging")
+	showVersion := flag.Bool("version", false, "print version")
+	sessionPath := flag.String("session", "", "session file to load")
 	flag.Parse()
 
-	tmux.Verbose = *verbose
-
-	if *target != "" {
-		content, err := tmux.CapturePane(*target)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "capture error:", err)
-			os.Exit(1)
-		}
-		fmt.Print(content)
+	if *showVersion {
+		fmt.Println(version)
 		return
+	}
+	if *sessionPath != "" {
+		repl.SetSessionFile(*sessionPath)
 	}
 
 	if err := repl.Run(); err != nil {
