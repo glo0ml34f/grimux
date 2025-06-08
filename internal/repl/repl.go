@@ -44,6 +44,7 @@ var buffers = map[string]string{
 var history []string
 
 var sessionFile = ".grimux_session"
+var sessionPass string
 
 // askPrefix is prepended to user prompts when using !ask.
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
@@ -52,6 +53,7 @@ type session struct {
 	History []string          `json:"history"`
 	Buffers map[string]string `json:"buffers"`
 	Prompt  string            `json:"prompt"`
+	APIKey  string            `json:"apikey"`
 }
 
 const (
@@ -181,11 +183,76 @@ func spinner() func() {
 
 // startRaw puts the terminal into raw mode.
 
+func readPassword() (string, error) {
+	old, err := startRaw()
+	if err != nil {
+		return "", err
+	}
+	defer stopRaw(old)
+	reader := bufio.NewReader(os.Stdin)
+	var buf bytes.Buffer
+	for {
+		r, _, err := reader.ReadRune()
+		if err != nil {
+			return "", err
+		}
+		if r == '\n' || r == '\r' {
+			break
+		}
+		buf.WriteRune(r)
+	}
+	fmt.Println()
+	return buf.String(), nil
+}
+
 // Run launches the interactive REPL.
 func Run() error {
 	if err := checkDeps(); err != nil {
 		return err
 	}
+	// load or create session before switching to raw mode
+	reader := bufio.NewReader(os.Stdin)
+	history = []string{}
+	if _, err := os.Stat(sessionFile); os.IsNotExist(err) {
+		cprint("Session name: ")
+		name, _ := reader.ReadString('\n')
+		name = strings.TrimSpace(name)
+		if name != "" {
+			sessionFile = name + ".grimux"
+		}
+		cprint("Password: ")
+		pwd, _ := readPassword()
+		sessionPass = pwd
+		buffers = map[string]string{"%file": "", "%code": ""}
+	} else if b, err := os.ReadFile(sessionFile); err == nil {
+		var s session
+		trimmed := bytes.TrimSpace(b)
+		if len(trimmed) > 0 && trimmed[0] != '{' {
+			cprint("Password: ")
+			pwd, _ := readPassword()
+			sessionPass = pwd
+			dec, err := decryptData(trimmed, sessionPass)
+			if err == nil {
+				if dec, err = decompressData(dec); err == nil {
+					json.Unmarshal(dec, &s)
+				}
+			}
+		} else {
+			json.Unmarshal(trimmed, &s)
+			cprint("Password: ")
+			pwd, _ := readPassword()
+			sessionPass = pwd
+		}
+		history = s.History
+		buffers = s.Buffers
+		if s.Prompt != "" {
+			askPrefix = s.Prompt
+		}
+		if s.APIKey != "" && os.Getenv("OPENAI_API_KEY") == "" {
+			openai.SetSessionAPIKey(s.APIKey)
+		}
+	}
+
 	oldState, err := startRaw()
 	if err != nil {
 		return fmt.Errorf("raw mode: %w", err)
@@ -193,18 +260,7 @@ func Run() error {
 	defer stopRaw(oldState)
 	defer cprintln("So long, and thanks for all the hacks! 🤘")
 
-	reader := bufio.NewReader(os.Stdin)
-	history = []string{}
-	if b, err := os.ReadFile(sessionFile); err == nil {
-		var s session
-		if json.Unmarshal(b, &s) == nil {
-			history = s.History
-			buffers = s.Buffers
-			if s.Prompt != "" {
-				askPrefix = s.Prompt
-			}
-		}
-	}
+	reader = bufio.NewReader(os.Stdin)
 	histIdx := 0
 	lineBuf := bytes.Buffer{}
 	lastQuestion := false
@@ -218,7 +274,7 @@ func Run() error {
 		cprintln("Checking OpenAI integration... ✅")
 		p := prompts[rand.Intn(len(prompts))]
 		stop := spinner()
-		reply, err := client.SendPrompt(p+"and please keep your response short, pithy, and funny")
+		reply, err := client.SendPrompt(p + "and please keep your response short, pithy, and funny")
 		stop()
 		if err == nil {
 			respPrintln(respSep)
@@ -339,7 +395,6 @@ func Run() error {
 		return true
 	}
 
-	prompt()
 	for {
 		r, _, err := reader.ReadRune()
 		if err != nil {
@@ -357,6 +412,7 @@ func Run() error {
 			}
 			if line == string(rune(12)) { // ctrl+l
 				clearScreen()
+				fmt.Println()
 				prompt()
 				continue
 			}
@@ -387,10 +443,12 @@ func Run() error {
 				history = append(history, line)
 				histIdx = len(history)
 			}
+			fmt.Println()
 			prompt()
 		case 12: // Ctrl+L
 			lastQuestion = false
 			clearScreen()
+			fmt.Println()
 			prompt()
 		case 3: // Ctrl+C
 			lastQuestion = false
@@ -471,9 +529,21 @@ func Run() error {
 
 // handleCommand executes a ! command. Returns true if repl should quit.
 func saveSession() {
-	s := session{History: history, Buffers: buffers, Prompt: askPrefix}
+	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey()}
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
-		os.WriteFile(sessionFile, b, 0644)
+		if sessionPass == "" {
+			os.WriteFile(sessionFile, b, 0644)
+			return
+		}
+		comp, err := compressData(b)
+		if err != nil {
+			return
+		}
+		enc, err := encryptData(comp, sessionPass)
+		if err != nil {
+			return
+		}
+		os.WriteFile(sessionFile, enc, 0644)
 	}
 }
 
@@ -692,7 +762,11 @@ func handleCommand(cmd string) bool {
 		if viewer == "" {
 			viewer = "batcat"
 		}
-		cmd := exec.Command(viewer, "-l", "markdown")
+		args := []string{"-l", "markdown"}
+		if strings.Contains(viewer, "batcat") {
+			args = append(args, "--paging=never")
+		}
+		cmd := exec.Command(viewer, args...)
 		cmd.Stdin = strings.NewReader(reply)
 		cmd.Stdout = os.Stdout
 		respPrintln(respSep)
