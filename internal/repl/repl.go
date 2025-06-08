@@ -59,6 +59,43 @@ func colorize(s string) string { return grimColor + s + "\033[0m" }
 func cprintln(s string)        { fmt.Println(colorize(s)) }
 func cprint(s string)          { fmt.Print(colorize(s)) }
 
+type paramInfo struct {
+	Name string
+	Desc string
+}
+
+type commandInfo struct {
+	Usage  string
+	Desc   string
+	Params []paramInfo
+}
+
+var commandOrder = []string{
+	"!capture", "!list", "!quit", "!exit", "!ask", "!save",
+	"!var", "!varcode", "!file", "!edit", "!run", "!print",
+	"!prompt", "!set_prompt", "!get_prompt", "!run_on", "!help",
+}
+
+var commands = map[string]commandInfo{
+	"!quit":       {Usage: "!quit", Desc: "save session and quit"},
+	"!exit":       {Usage: "!exit", Desc: "exit immediately"},
+	"!list":       {Usage: "!list", Desc: "list panes and buffers"},
+	"!capture":    {Usage: "!capture <buffer> <pane-id>", Desc: "capture a pane into a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane-id>", "tmux pane id"}}},
+	"!save":       {Usage: "!save <buffer> <file>", Desc: "save buffer to file", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<file>", "path to file"}}},
+	"!file":       {Usage: "!file <path>", Desc: "load file into %file", Params: []paramInfo{{"<path>", "file path"}}},
+	"!edit":       {Usage: "!edit <buffer>", Desc: "edit buffer in $EDITOR", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!run":        {Usage: "!run <command>", Desc: "run shell command", Params: []paramInfo{{"<command>", "command to run"}}},
+	"!var":        {Usage: "!var <buffer> <prompt>", Desc: "AI prompt into buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
+	"!varcode":    {Usage: "!varcode <buffer> <prompt>", Desc: "AI prompt, store code", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
+	"!print":      {Usage: "!print <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!prompt":     {Usage: "!prompt <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
+	"!set_prompt": {Usage: "!set_prompt <buffer>", Desc: "set prefix from buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
+	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
+	"!ask":        {Usage: "!ask <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
+	"!help":       {Usage: "!help", Desc: "show this help"},
+}
+
 func replacePaneRefs(text string) string {
 	return panePattern.ReplaceAllStringFunc(text, func(tok string) string {
 		m := panePattern.FindStringSubmatch(tok)
@@ -163,9 +200,8 @@ func Run() error {
 				}
 			}
 		}
-		cmds := []string{"!capture", "!list", "!quit", "!exit", "!ask", "!save", "!var", "!varcode", "!file", "!edit", "!run", "!print", "!prompt", "!set_prompt", "!get_prompt", "!run_on"}
 		matches := []string{}
-		for _, c := range cmds {
+		for _, c := range commandOrder {
 			if strings.HasPrefix(c, prefix) {
 				matches = append(matches, c)
 			}
@@ -207,6 +243,36 @@ func Run() error {
 				break
 			}
 		}
+		printLine()
+	}
+
+	paramHelp := func() {
+		line := lineBuf.String()
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0][0] != '!' {
+			return
+		}
+		info, ok := commands[fields[0]]
+		if !ok {
+			return
+		}
+		var idx int
+		if len(fields) == 1 {
+			idx = 0
+		} else if strings.HasSuffix(line, " ") {
+			idx = len(fields) - 1
+		} else {
+			idx = len(fields) - 2
+		}
+		if idx < 0 || idx >= len(info.Params) {
+			cprintln("")
+			cprintln("no more parameters")
+			printLine()
+			return
+		}
+		p := info.Params[idx]
+		cprintln("")
+		cprintln(p.Name + " - " + p.Desc)
 		printLine()
 	}
 
@@ -274,6 +340,8 @@ func Run() error {
 			autocomplete()
 		case 18: // Ctrl+R reverse search
 			reverseSearch()
+		case '?':
+			paramHelp()
 		case 27: // escape sequences (arrows or alt-digit)
 			next1, _, err := reader.ReadRune()
 			if err != nil {
@@ -329,6 +397,11 @@ func saveSession() {
 
 func handleCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
+	usage := func(name string) {
+		if info, ok := commands[name]; ok {
+			cprintln("usage: " + info.Usage + " - " + info.Desc)
+		}
+	}
 	switch fields[0] {
 	case "!quit":
 		saveSession()
@@ -344,7 +417,7 @@ func handleCommand(cmd string) bool {
 		}
 	case "!capture":
 		if len(fields) < 3 {
-			cprintln("usage: !capture <buffer> <pane-id>")
+			usage("!capture")
 			return false
 		}
 		out, err := exec.Command(os.Args[0], "-capture", fields[2]).Output()
@@ -356,7 +429,7 @@ func handleCommand(cmd string) bool {
 		cprint(string(out))
 	case "!save":
 		if len(fields) < 3 {
-			cprintln("usage: !save <buffer> <file>")
+			usage("!save")
 			return false
 		}
 		data, ok := buffers[fields[1]]
@@ -369,7 +442,7 @@ func handleCommand(cmd string) bool {
 		}
 	case "!file":
 		if len(fields) < 2 {
-			cprintln("usage: !file <path>")
+			usage("!file")
 			return false
 		}
 		b, err := os.ReadFile(fields[1])
@@ -380,7 +453,7 @@ func handleCommand(cmd string) bool {
 		buffers["%file"] = string(b)
 	case "!edit":
 		if len(fields) < 2 {
-			cprintln("usage: !edit <buffer>")
+			usage("!edit")
 			return false
 		}
 		data, ok := buffers[fields[1]]
@@ -415,7 +488,7 @@ func handleCommand(cmd string) bool {
 		os.Remove(tmp.Name())
 	case "!run":
 		if len(fields) < 2 {
-			cprintln("usage: !run <command>")
+			usage("!run")
 			return false
 		}
 		cmdStr := replaceBufferRefs(strings.Join(fields[1:], " "))
@@ -429,7 +502,7 @@ func handleCommand(cmd string) bool {
 		cprint(out.String())
 	case "!var":
 		if len(fields) < 3 {
-			cprintln("usage: !var <buffer> <prompt>")
+			usage("!var")
 			return false
 		}
 		client, err := openai.NewClient()
@@ -447,7 +520,7 @@ func handleCommand(cmd string) bool {
 		cprintln(reply)
 	case "!varcode":
 		if len(fields) < 3 {
-			cprintln("usage: !varcode <buffer> <prompt>")
+			usage("!varcode")
 			return false
 		}
 		client, err := openai.NewClient()
@@ -465,19 +538,19 @@ func handleCommand(cmd string) bool {
 		cprintln(reply)
 	case "!print":
 		if len(fields) < 2 {
-			cprintln("usage: !print <buffer>")
+			usage("!print")
 			return false
 		}
 		cprint(buffers[fields[1]])
 	case "!prompt":
 		if len(fields) < 3 {
-			cprintln("usage: !prompt <buffer> <text>")
+			usage("!prompt")
 			return false
 		}
 		buffers[fields[1]] = strings.Join(fields[2:], " ")
 	case "!set_prompt":
 		if len(fields) < 2 {
-			cprintln("usage: !set_prompt <buffer>")
+			usage("!set_prompt")
 			return false
 		}
 		if v, ok := buffers[fields[1]]; ok {
@@ -489,7 +562,7 @@ func handleCommand(cmd string) bool {
 		cprintln(askPrefix)
 	case "!run_on":
 		if len(fields) < 4 {
-			cprintln("usage: !run_on <buffer> <pane> <cmd>")
+			usage("!run_on")
 			return false
 		}
 		cmdStr := replaceBufferRefs(replacePaneRefs(strings.Join(fields[3:], " ")))
@@ -503,7 +576,7 @@ func handleCommand(cmd string) bool {
 		buffers[fields[1]] = out.String()
 	case "!ask":
 		if len(fields) < 2 {
-			cprintln("usage: !ask <prompt>")
+			usage("!ask")
 			return false
 		}
 		client, err := openai.NewClient()
@@ -529,6 +602,11 @@ func handleCommand(cmd string) bool {
 			cprintln(viewer + " error: " + err.Error())
 		}
 		buffers["%code"] = lastCodeBlock(reply)
+	case "!help":
+		for _, name := range commandOrder {
+			info := commands[name]
+			cprintln(info.Usage + " - " + info.Desc)
+		}
 	default:
 		cprintln("unknown command")
 	}
