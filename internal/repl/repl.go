@@ -235,6 +235,9 @@ func Run() error {
 			}
 			history = s.History
 			buffers = s.Buffers
+			if buffers == nil {
+				buffers = map[string]string{"%file": "", "%code": ""}
+			}
 			if s.Prompt != "" {
 				askPrefix = s.Prompt
 			}
