@@ -98,7 +98,7 @@ type commandInfo struct {
 var commandOrder = []string{
 	"!capture", "!list", "!quit", "!exit", "!ask", "!save",
 	"!var", "!varcode", "!file", "!edit", "!run", "!print",
-	"!prompt", "!set_prompt", "!get_prompt", "!session", "!run_on", "!help",
+	"!prompt", "!set_prompt", "!get_prompt", "!session", "!run_on", "!flow", "!help",
 }
 
 var commands = map[string]commandInfo{
@@ -118,6 +118,7 @@ var commands = map[string]commandInfo{
 	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
 	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
 	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
+	"!flow":       {Usage: "!flow <buf1> [buf2 ... buf10]", Desc: "chain prompts using buffers", Params: []paramInfo{{"<buf>", "buffer name"}}},
 	"!ask":        {Usage: "!ask <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 }
@@ -293,7 +294,8 @@ func Run() error {
 
 	reader = bufio.NewReader(os.Stdin)
 	histIdx := 0
-	lineBuf := bytes.Buffer{}
+	lineBuf := []rune{}
+	cursor := 0
 	lastQuestion := false
 
 	cprintln(asciiArt + "\nWelcome to grimux! 💀")
@@ -334,11 +336,14 @@ func Run() error {
 	printLine := func() {
 		fmt.Print("\r\033[K")
 		prompt()
-		fmt.Print(lineBuf.String())
+		fmt.Print(string(lineBuf))
+		if cursor < len(lineBuf) {
+			fmt.Printf("\033[%dD", len(lineBuf)-cursor)
+		}
 	}
 
 	autocomplete := func() {
-		prefix := lineBuf.String()
+		prefix := string(lineBuf)
 		fields := strings.Fields(prefix)
 		if len(fields) > 0 && (fields[0] == "!save" || fields[0] == "!file") {
 			if len(fields) >= 2 && !strings.HasSuffix(prefix, " ") {
@@ -346,8 +351,8 @@ func Run() error {
 				matches, _ := filepath.Glob(pattern)
 				if len(matches) == 1 {
 					fields[len(fields)-1] = matches[0]
-					lineBuf.Reset()
-					lineBuf.WriteString(strings.Join(fields, " "))
+					lineBuf = []rune(strings.Join(fields, " "))
+					cursor = len(lineBuf)
 					printLine()
 					return
 				}
@@ -369,8 +374,8 @@ func Run() error {
 			return
 		}
 		if len(matches) == 1 {
-			lineBuf.Reset()
-			lineBuf.WriteString(matches[0])
+			lineBuf = []rune(matches[0])
+			cursor = len(lineBuf)
 			printLine()
 			return
 		}
@@ -396,8 +401,8 @@ func Run() error {
 			if strings.Contains(history[i], query) {
 				cprint("\n")
 				cprintln(history[i])
-				lineBuf.Reset()
-				lineBuf.WriteString(history[i])
+				lineBuf = []rune(history[i])
+				cursor = len(lineBuf)
 				histIdx = i
 				break
 			}
@@ -406,7 +411,7 @@ func Run() error {
 	}
 
 	paramHelp := func() bool {
-		line := lineBuf.String()
+		line := string(lineBuf)
 		fields := strings.Fields(line)
 		if len(fields) == 0 || fields[0][0] != '!' {
 			return false
@@ -441,8 +446,9 @@ func Run() error {
 		switch r {
 		case '\n', '\r':
 			lastQuestion = false
-			line := lineBuf.String()
-			lineBuf.Reset()
+			line := string(lineBuf)
+			lineBuf = []rune{}
+			cursor = 0
 			cprintln("")
 			if len(line) == 0 {
 				prompt()
@@ -484,6 +490,16 @@ func Run() error {
 			}
 			fmt.Println()
 			prompt()
+		case 1: // Ctrl+A
+			cursor = 0
+			printLine()
+		case 5: // Ctrl+E
+			cursor = len(lineBuf)
+			printLine()
+		case 21: // Ctrl+U
+			lineBuf = []rune{}
+			cursor = 0
+			printLine()
 		case 12: // Ctrl+L
 			lastQuestion = false
 			clearScreen()
@@ -498,12 +514,11 @@ func Run() error {
 			cprintln("")
 			return nil
 		case 127: // Backspace
-			if lineBuf.Len() > 0 {
+			if cursor > 0 {
 				lastQuestion = false
-				buf := lineBuf.Bytes()
-				lineBuf.Reset()
-				lineBuf.Write(buf[:len(buf)-1])
-				fmt.Print("\b \b")
+				lineBuf = append(lineBuf[:cursor-1], lineBuf[cursor:]...)
+				cursor--
+				printLine()
 			}
 		case 9: // Tab
 			lastQuestion = false
@@ -513,8 +528,9 @@ func Run() error {
 			reverseSearch()
 		case '?':
 			if lastQuestion || !paramHelp() {
-				lineBuf.WriteRune('?')
-				cprint("?")
+				lineBuf = append(lineBuf[:cursor], append([]rune{'?'}, lineBuf[cursor:]...)...)
+				cursor++
+				printLine()
 				lastQuestion = false
 			} else {
 				lastQuestion = true
@@ -527,8 +543,9 @@ func Run() error {
 			}
 			if next1 >= '0' && next1 <= '9' {
 				token := fmt.Sprintf("{%%%c}", next1)
-				lineBuf.WriteString(token)
-				cprint(token)
+				lineBuf = append(lineBuf[:cursor], append([]rune(token), lineBuf[cursor:]...)...)
+				cursor += len([]rune(token))
+				printLine()
 				continue
 			}
 			if next1 != '[' {
@@ -542,26 +559,28 @@ func Run() error {
 			case 'A': // Up arrow
 				if histIdx > 0 {
 					histIdx--
-					lineBuf.Reset()
-					lineBuf.WriteString(history[histIdx])
+					lineBuf = []rune(history[histIdx])
+					cursor = len(lineBuf)
 					printLine()
 				}
 			case 'B': // Down arrow
 				if histIdx < len(history)-1 {
 					histIdx++
-					lineBuf.Reset()
-					lineBuf.WriteString(history[histIdx])
+					lineBuf = []rune(history[histIdx])
+					cursor = len(lineBuf)
 					printLine()
 				} else if histIdx == len(history)-1 {
 					histIdx = len(history)
-					lineBuf.Reset()
+					lineBuf = []rune{}
+					cursor = 0
 					printLine()
 				}
 			}
 		default:
 			lastQuestion = false
-			lineBuf.WriteRune(r)
-			cprint(string(r))
+			lineBuf = append(lineBuf[:cursor], append([]rune{r}, lineBuf[cursor:]...)...)
+			cursor++
+			printLine()
 		}
 	}
 }
@@ -791,14 +810,59 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		cmdStr := replaceBufferRefs(replacePaneRefs(strings.Join(fields[3:], " ")))
-		c := exec.Command("bash", "-c", cmdStr)
-		var out bytes.Buffer
-		c.Stdout = &out
-		c.Stderr = &out
-		if err := c.Run(); err != nil {
+		if err := tmux.SendKeys(fields[2], cmdStr, "Enter"); err != nil {
 			cmdPrintln("run_on error: " + err.Error())
+			return false
 		}
-		buffers[fields[1]] = out.String()
+		time.Sleep(200 * time.Millisecond)
+		out, err := capturePane(fields[2])
+		if err != nil {
+			cmdPrintln("capture error: " + err.Error())
+			return false
+		}
+		buffers[fields[1]] = out
+		forceEnter()
+	case "!flow":
+		if len(fields) < 2 || len(fields) > 11 {
+			usage("!flow")
+			return false
+		}
+		client, err := openai.NewClient()
+		if err != nil {
+			cmdPrintln(err.Error())
+			return false
+		}
+		promptText, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		var reply string
+		stop := spinner()
+		reply, err = client.SendPrompt(promptText)
+		stop()
+		if err != nil {
+			cprintln("openai error: " + err.Error())
+			return false
+		}
+		for i := 2; i < len(fields); i++ {
+			prefix, ok := buffers[fields[i]]
+			if !ok {
+				cmdPrintln("unknown buffer")
+				return false
+			}
+			stop = spinner()
+			reply, err = client.SendPrompt(prefix + reply)
+			stop()
+			if err != nil {
+				cprintln("openai error: " + err.Error())
+				return false
+			}
+		}
+		respPrintln(respSep)
+		respPrintln(reply)
+		respPrintln(respSep)
+		buffers["%code"] = lastCodeBlock(reply)
 		forceEnter()
 	case "!ask":
 		if len(fields) < 2 {
