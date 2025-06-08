@@ -166,12 +166,14 @@ func checkDeps() error {
 func spinner() func() {
 	frames := []string{"😈", "👿", "😈", "🤔"}
 	done := make(chan struct{})
+	finished := make(chan struct{})
 	go func() {
 		i := 0
 		for {
 			select {
 			case <-done:
 				fmt.Print("\r\033[K")
+				close(finished)
 				return
 			default:
 				fmt.Printf("\r%s", colorize(respColor, frames[i%len(frames)]))
@@ -180,7 +182,10 @@ func spinner() func() {
 			}
 		}
 	}()
-	return func() { close(done) }
+	return func() {
+		close(done)
+		<-finished
+	}
 }
 
 // forceEnter prints a newline to ensure the prompt is visible after
@@ -795,9 +800,6 @@ func handleCommand(cmd string) bool {
 			viewer = "batcat"
 		}
 		args := []string{"-l", "markdown"}
-		if strings.Contains(viewer, "bat") {
-			args = append(args, "--paging=never")
-		}
 		cmd := exec.Command(viewer, args...)
 		cmd.Stdin = strings.NewReader(reply)
 		cmd.Stdout = os.Stdout
