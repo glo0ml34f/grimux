@@ -1,14 +1,24 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 )
 
 var apiURL = "https://api.openai.com/v1/chat/completions"
+
+var sessionAPIKey string
+
+// SetSessionAPIKey stores the API key loaded from the session file.
+func SetSessionAPIKey(k string) { sessionAPIKey = k }
+
+// GetSessionAPIKey returns the API key saved in the current session.
+func GetSessionAPIKey() string { return sessionAPIKey }
 
 // Client interacts with the OpenAI API.
 type Client struct {
@@ -19,6 +29,20 @@ type Client struct {
 // NewClient creates a client using the OPENAI_API_KEY environment variable.
 func NewClient() (*Client, error) {
 	key := os.Getenv("OPENAI_API_KEY")
+	if key == "" {
+		key = sessionAPIKey
+	}
+	if key == "" {
+		fmt.Print("OpenAI API key: ")
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
+		fmt.Println()
+		if err != nil {
+			return nil, err
+		}
+		key = strings.TrimSpace(line)
+		sessionAPIKey = key
+	}
 	if key == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY not set")
 	}
