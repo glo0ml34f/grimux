@@ -218,7 +218,7 @@ func Run() error {
 		cprintln("Checking OpenAI integration... ✅")
 		p := prompts[rand.Intn(len(prompts))]
 		stop := spinner()
-		reply, err := client.SendPrompt(p)
+		reply, err := client.SendPrompt(p+"and please keep your response short, pithy, and funny")
 		stop()
 		if err == nil {
 			respPrintln(respSep)
