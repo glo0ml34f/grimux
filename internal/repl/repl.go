@@ -43,7 +43,8 @@ var buffers = map[string]string{
 
 var history []string
 
-var sessionFile = ".grimux_session"
+var sessionFile string
+var sessionName string
 var sessionPass string
 
 // askPrefix is prepended to user prompts when using !ask.
@@ -59,7 +60,7 @@ type session struct {
 const (
 	grimColor = "\033[38;5;141m" // internal grimux messages
 	cmdColor  = "\033[38;5;51m"  // user commands
-	respColor = "\033[38;5;214m" // LLM responses
+	respColor = "\033[38;5;205m" // LLM responses
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
@@ -74,6 +75,7 @@ var respSep = colorize(respColor, strings.Repeat("─", 40))
 func SetSessionFile(path string) {
 	if path != "" {
 		sessionFile = path
+		sessionName = strings.TrimSuffix(filepath.Base(path), ".grimux")
 	}
 }
 
@@ -162,7 +164,7 @@ func checkDeps() error {
 // spinner displays a cute "thinking" indicator until the returned function is
 // called. It rewrites the same line without printing newlines.
 func spinner() func() {
-	frames := []string{"🤖", "🤖.", "🤖..", "🤖..."}
+	frames := []string{"😈", "👿", "😈", "🤔"}
 	done := make(chan struct{})
 	go func() {
 		i := 0
@@ -210,47 +212,39 @@ func Run() error {
 	if err := checkDeps(); err != nil {
 		return err
 	}
-	// load or create session before switching to raw mode
+	// load session before switching to raw mode
 	reader := bufio.NewReader(os.Stdin)
 	history = []string{}
-	if _, err := os.Stat(sessionFile); os.IsNotExist(err) {
-		cprint("Session name: ")
-		name, _ := reader.ReadString('\n')
-		name = strings.TrimSpace(name)
-		if name != "" {
-			sessionFile = name + ".grimux"
-		}
-		cprint("Password: ")
-		pwd, _ := readPassword()
-		sessionPass = pwd
-		buffers = map[string]string{"%file": "", "%code": ""}
-	} else if b, err := os.ReadFile(sessionFile); err == nil {
-		var s session
-		trimmed := bytes.TrimSpace(b)
-		if len(trimmed) > 0 && trimmed[0] != '{' {
-			cprint("Password: ")
-			pwd, _ := readPassword()
-			sessionPass = pwd
-			dec, err := decryptData(trimmed, sessionPass)
-			if err == nil {
-				if dec, err = decompressData(dec); err == nil {
-					json.Unmarshal(dec, &s)
+	buffers = map[string]string{"%file": "", "%code": ""}
+	if sessionFile != "" {
+		if b, err := os.ReadFile(sessionFile); err == nil {
+			var s session
+			trimmed := bytes.TrimSpace(b)
+			if len(trimmed) > 0 && trimmed[0] != '{' {
+				cprint("Password: ")
+				pwd, _ := readPassword()
+				sessionPass = pwd
+				dec, err := decryptData(trimmed, sessionPass)
+				if err == nil {
+					if dec, err = decompressData(dec); err == nil {
+						json.Unmarshal(dec, &s)
+					}
 				}
+			} else {
+				json.Unmarshal(trimmed, &s)
 			}
-		} else {
-			json.Unmarshal(trimmed, &s)
-			cprint("Password: ")
-			pwd, _ := readPassword()
-			sessionPass = pwd
+			history = s.History
+			buffers = s.Buffers
+			if s.Prompt != "" {
+				askPrefix = s.Prompt
+			}
+			if s.APIKey != "" && os.Getenv("OPENAI_API_KEY") == "" {
+				openai.SetSessionAPIKey(s.APIKey)
+			}
 		}
-		history = s.History
-		buffers = s.Buffers
-		if s.Prompt != "" {
-			askPrefix = s.Prompt
-		}
-		if s.APIKey != "" && os.Getenv("OPENAI_API_KEY") == "" {
-			openai.SetSessionAPIKey(s.APIKey)
-		}
+	}
+	if sessionFile != "" && sessionName == "" {
+		sessionName = strings.TrimSuffix(filepath.Base(sessionFile), ".grimux")
 	}
 
 	oldState, err := startRaw()
@@ -266,6 +260,7 @@ func Run() error {
 	lastQuestion := false
 
 	cprintln(asciiArt + "\nWelcome to grimux! 💀")
+	cprintln("Press Tab for auto-completion. Type !help for more info.")
 
 	rand.Seed(time.Now().UnixNano())
 	if client, err := openai.NewClient(); err != nil {
@@ -286,7 +281,11 @@ func Run() error {
 	}
 
 	prompt := func() {
-		fmt.Print("\033[1;35mgrimux😈> \033[0m")
+		if sessionName != "" {
+			fmt.Printf("\033[1;35mgrimux(%s)😈> \033[0m", sessionName)
+		} else {
+			fmt.Print("\033[1;35mgrimux😈> \033[0m")
+		}
 	}
 
 	clearScreen := func() {
@@ -529,6 +528,23 @@ func Run() error {
 
 // handleCommand executes a ! command. Returns true if repl should quit.
 func saveSession() {
+	reader := bufio.NewReader(os.Stdin)
+	if sessionFile == "" {
+		cprint("Session name (blank for hidden): ")
+		name, _ := reader.ReadString('\n')
+		name = strings.TrimSpace(name)
+		if name != "" {
+			sessionFile = name + ".grimux"
+			sessionName = name
+		} else {
+			sessionFile = ".grimux_session"
+		}
+	}
+	if sessionPass == "" {
+		cprint("Password: ")
+		pwd, _ := readPassword()
+		sessionPass = pwd
+	}
 	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey()}
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		if sessionPass == "" {
@@ -763,9 +779,6 @@ func handleCommand(cmd string) bool {
 			viewer = "batcat"
 		}
 		args := []string{"-l", "markdown"}
-		if strings.Contains(viewer, "batcat") {
-			args = append(args, "--paging=never")
-		}
 		cmd := exec.Command(viewer, args...)
 		cmd.Stdin = strings.NewReader(reply)
 		cmd.Stdout = os.Stdout
