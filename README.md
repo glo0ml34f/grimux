@@ -2,7 +2,7 @@
 A tmux-driven AI-assisted rapid prototyping interface
 
 ## About 🚀
-`grimux` is a small proof-of-concept that shows how a Go CLI can talk to tmux directly. The long term idea is to build a TUI that can capture pane contents, send them to an AI backend and display the results in another pane. For now the tool just demonstrates how to capture text from another pane via tmux's UNIX socket.
+`grimux` is a small proof-of-concept that shows how a Go CLI can talk to tmux directly. The long term idea is to build a TUI that can capture pane contents, send them to an AI backend and display the results in another pane. For now the tool just demonstrates how to capture text from another pane via tmux's UNIX socket. The REPL now works in iTerm on macOS as well as in Linux terminal emulators.
 
 When launched with no arguments the CLI now prints colorful ASCII art and asks the OpenAI API for a random, pithy complaint about dealing with nonsense. The prompt as well as the command prompt itself are decorated with a bit of color and emoji flair.
 
