@@ -47,3 +47,24 @@ func CapturePane(target string) (string, error) {
 	}
 	return buf.String(), nil
 }
+
+// SendKeys sends the given keys to the specified pane using tmux send-keys.
+// The keys slice is passed as individual arguments to the tmux command.
+func SendKeys(target string, keys ...string) error {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return errors.New("TMUX environment variable is not set")
+	}
+	socket := strings.Split(tmuxEnv, ",")[0]
+	if _, err := os.Stat(socket); err != nil {
+		return fmt.Errorf("tmux socket missing: %w", err)
+	}
+	args := []string{"-S", socket, "send-keys"}
+	if target != "" {
+		args = append(args, "-t", target)
+	}
+	args = append(args, keys...)
+	debugf("running: tmux %s", strings.Join(args, " "))
+	cmd := exec.Command("tmux", args...)
+	return cmd.Run()
+}

@@ -80,3 +80,23 @@ func TestCapturePaneCurrent(t *testing.T) {
 		t.Fatalf("unexpected args: %q", args)
 	}
 }
+
+func TestSendKeys(t *testing.T) {
+	sock, argsFile, cleanup := startFakeTmux(t, "")
+	defer cleanup()
+	os.Setenv("TMUX", sock+",session")
+
+	if err := SendKeys("%2", "echo", "hi", "Enter"); err != nil {
+		t.Fatalf("SendKeys: %v", err)
+	}
+
+	b, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	args := string(bytes.TrimSpace(b))
+	expected := fmt.Sprintf("-S %s send-keys -t %s echo hi Enter", sock, "%2")
+	if args != expected {
+		t.Fatalf("unexpected args: %q", args)
+	}
+}
