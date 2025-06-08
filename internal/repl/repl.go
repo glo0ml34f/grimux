@@ -58,9 +58,11 @@ type session struct {
 }
 
 const (
-	grimColor = "\033[38;5;141m" // internal grimux messages
-	cmdColor  = "\033[38;5;51m"  // user commands
-	respColor = "\033[38;5;205m" // LLM responses
+	grimColor    = "\033[38;5;141m" // internal grimux messages
+	cmdColor     = "\033[38;5;51m"  // user commands
+	respColor    = "\033[38;5;205m" // LLM responses
+	successColor = "\033[38;5;82m"  // success messages
+	warnColor    = "\033[38;5;196m" // warnings or important prompts
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
@@ -68,6 +70,9 @@ func cprintln(s string)               { fmt.Println(colorize(grimColor, s)) }
 func cprint(s string)                 { fmt.Print(colorize(grimColor, s)) }
 func cmdPrintln(s string)             { fmt.Println(colorize(cmdColor, s)) }
 func respPrintln(s string)            { fmt.Println(colorize(respColor, s)) }
+func successPrintln(s string)         { fmt.Println(colorize(successColor, s)) }
+func warnPrintln(s string)            { fmt.Println(colorize(warnColor, s)) }
+func ok() string                      { return colorize(successColor, "✅") }
 
 var respSep = colorize(respColor, strings.Repeat("─", 40))
 
@@ -154,10 +159,14 @@ var requiredBins = []string{"tmux", "vim", "batcat", "bash"}
 
 func checkDeps() error {
 	for _, b := range requiredBins {
+		cprint(fmt.Sprintf("Checking %s... ", b))
 		if _, err := exec.LookPath(b); err != nil {
+			cprintln("❌")
 			return fmt.Errorf("missing dependency: %s", b)
 		}
+		cprintln(ok())
 	}
+	cprintln("Flux capacitor charged... " + ok())
 	return nil
 }
 
@@ -192,6 +201,20 @@ func spinner() func() {
 // running external commands while in raw mode.
 func forceEnter() {
 	fmt.Print("\r\n")
+}
+
+// bootScreen displays a campy supercomputer boot screen.
+func bootScreen() {
+	lines := []string{
+		"Initializing Darkstar AI Core...",
+		"Loading neural subroutines... " + ok(),
+		"Calibrating sarcasm engines... " + ok(),
+		"Quantum flux capacitor stable... " + ok(),
+		colorize(warnColor, "PRESS RETURN IF YOU DARE"),
+	}
+	for _, l := range lines {
+		cprintln(l)
+	}
 }
 
 // startRaw puts the terminal into raw mode.
@@ -280,16 +303,17 @@ func Run() error {
 	if client, err := openai.NewClient(); err != nil {
 		cprintln("⚠️  " + err.Error())
 	} else {
-		cprintln("Checking OpenAI integration... ✅")
 		p := prompts[rand.Intn(len(prompts))]
 		stop := spinner()
 		reply, err := client.SendPrompt(p + "and please keep your response short, pithy, and funny")
 		stop()
 		if err == nil {
+			cprintln("Checking OpenAI integration... " + ok())
 			respPrintln(respSep)
 			respPrintln(reply)
 			forceEnter()
 			respPrintln(respSep)
+			bootScreen()
 		} else {
 			cprintln("openai error: " + err.Error())
 		}
