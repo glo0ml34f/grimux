@@ -27,9 +27,9 @@ const asciiArt = "\033[1;36m" + `
 ` + "\033[0m"
 
 var prompts = []string{
-	"Give me a pithy complaint about being bothered with nonsense",
-	"Provide a short gripe about having to deal with nonsense",
-	"What's a witty moan about pointless nonsense?",
+	"In a haze of eternal night, grumble about being woken for more human nonsense",
+	"As a whimsical witch-hacker, sigh at mortals poking around your terminal",
+	"With playful disdain, lament yet another ridiculous request from the living",
 }
 
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
@@ -43,7 +43,7 @@ var buffers = map[string]string{
 
 var history []string
 
-const sessionFile = ".grimux_session"
+var sessionFile = ".grimux_session"
 
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
 
@@ -59,6 +59,13 @@ func colorize(s string) string { return grimColor + s + "\033[0m" }
 func cprintln(s string)        { fmt.Println(colorize(s)) }
 func cprint(s string)          { fmt.Print(colorize(s)) }
 
+// SetSessionFile changes the path used when loading or saving session state.
+func SetSessionFile(path string) {
+	if path != "" {
+		sessionFile = path
+	}
+}
+
 type paramInfo struct {
 	Name string
 	Desc string
@@ -73,7 +80,7 @@ type commandInfo struct {
 var commandOrder = []string{
 	"!capture", "!list", "!quit", "!exit", "!ask", "!save",
 	"!var", "!varcode", "!file", "!edit", "!run", "!print",
-	"!prompt", "!set_prompt", "!get_prompt", "!run_on", "!help",
+	"!prompt", "!set_prompt", "!get_prompt", "!session", "!run_on", "!help",
 }
 
 var commands = map[string]commandInfo{
@@ -91,6 +98,7 @@ var commands = map[string]commandInfo{
 	"!prompt":     {Usage: "!prompt <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
 	"!set_prompt": {Usage: "!set_prompt <buffer>", Desc: "set prefix from buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
+	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
 	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
 	"!ask":        {Usage: "!ask <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
@@ -129,10 +137,24 @@ func lastCodeBlock(text string) string {
 	return matches[len(matches)-1][2]
 }
 
+var requiredBins = []string{"tmux", "vim", "batcat", "bash"}
+
+func checkDeps() error {
+	for _, b := range requiredBins {
+		if _, err := exec.LookPath(b); err != nil {
+			return fmt.Errorf("missing dependency: %s", b)
+		}
+	}
+	return nil
+}
+
 // startRaw puts the terminal into raw mode.
 
 // Run launches the interactive REPL.
 func Run() error {
+	if err := checkDeps(); err != nil {
+		return err
+	}
 	oldState, err := startRaw()
 	if err != nil {
 		return fmt.Errorf("raw mode: %w", err)
@@ -153,14 +175,20 @@ func Run() error {
 	}
 	histIdx := 0
 	lineBuf := bytes.Buffer{}
+	lastQuestion := false
 
 	cprintln(asciiArt + "\nWelcome to grimux! 💀")
 
 	rand.Seed(time.Now().UnixNano())
-	if client, err := openai.NewClient(); err == nil {
+	if client, err := openai.NewClient(); err != nil {
+		cprintln("⚠️  " + err.Error())
+	} else {
+		cprintln("Checking OpenAI integration... ✅")
 		p := prompts[rand.Intn(len(prompts))]
 		if reply, err := client.SendPrompt(p); err == nil {
 			cprintln(reply)
+		} else {
+			cprintln("openai error: " + err.Error())
 		}
 	}
 
@@ -246,15 +274,15 @@ func Run() error {
 		printLine()
 	}
 
-	paramHelp := func() {
+	paramHelp := func() bool {
 		line := lineBuf.String()
 		fields := strings.Fields(line)
 		if len(fields) == 0 || fields[0][0] != '!' {
-			return
+			return false
 		}
 		info, ok := commands[fields[0]]
 		if !ok {
-			return
+			return false
 		}
 		var idx int
 		if len(fields) == 1 {
@@ -265,15 +293,13 @@ func Run() error {
 			idx = len(fields) - 2
 		}
 		if idx < 0 || idx >= len(info.Params) {
-			cprintln("")
-			cprintln("no more parameters")
-			printLine()
-			return
+			return false
 		}
 		p := info.Params[idx]
 		cprintln("")
 		cprintln(p.Name + " - " + p.Desc)
 		printLine()
+		return true
 	}
 
 	prompt()
@@ -284,6 +310,7 @@ func Run() error {
 		}
 		switch r {
 		case '\n', '\r':
+			lastQuestion = false
 			line := lineBuf.String()
 			lineBuf.Reset()
 			cprintln("")
@@ -321,28 +348,41 @@ func Run() error {
 			}
 			prompt()
 		case 12: // Ctrl+L
+			lastQuestion = false
 			clearScreen()
 			prompt()
 		case 3: // Ctrl+C
+			lastQuestion = false
 			cprintln("")
 			return nil
 		case 4: // Ctrl+D
+			lastQuestion = false
 			cprintln("")
 			return nil
 		case 127: // Backspace
 			if lineBuf.Len() > 0 {
+				lastQuestion = false
 				buf := lineBuf.Bytes()
 				lineBuf.Reset()
 				lineBuf.Write(buf[:len(buf)-1])
 				fmt.Print("\b \b")
 			}
 		case 9: // Tab
+			lastQuestion = false
 			autocomplete()
 		case 18: // Ctrl+R reverse search
+			lastQuestion = false
 			reverseSearch()
 		case '?':
-			paramHelp()
+			if lastQuestion || !paramHelp() {
+				lineBuf.WriteRune('?')
+				cprint("?")
+				lastQuestion = false
+			} else {
+				lastQuestion = true
+			}
 		case 27: // escape sequences (arrows or alt-digit)
+			lastQuestion = false
 			next1, _, err := reader.ReadRune()
 			if err != nil {
 				return err
@@ -381,6 +421,7 @@ func Run() error {
 				}
 			}
 		default:
+			lastQuestion = false
 			lineBuf.WriteRune(r)
 			cprint(string(r))
 		}
@@ -420,13 +461,13 @@ func handleCommand(cmd string) bool {
 			usage("!capture")
 			return false
 		}
-		out, err := exec.Command(os.Args[0], "-capture", fields[2]).Output()
+		out, err := capturePane(fields[2])
 		if err != nil {
 			cprintln("capture error: " + err.Error())
 			return false
 		}
-		buffers[fields[1]] = string(out)
-		cprint(string(out))
+		buffers[fields[1]] = out
+		cprint(out)
 	case "!save":
 		if len(fields) < 3 {
 			usage("!save")
@@ -560,6 +601,11 @@ func handleCommand(cmd string) bool {
 		}
 	case "!get_prompt":
 		cprintln(askPrefix)
+	case "!session":
+		s := session{History: history, Buffers: buffers, Prompt: askPrefix}
+		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
+			buffers["%session"] = string(b)
+		}
 	case "!run_on":
 		if len(fields) < 4 {
 			usage("!run_on")
