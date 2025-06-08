@@ -291,6 +291,33 @@ func readPassword() (string, error) {
 	return buf.String(), nil
 }
 
+// readLine reads a line from stdin while echoing user input. It is used while
+// in raw mode so users can see what they type.
+func readLine() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+	var buf []rune
+	for {
+		r, _, err := reader.ReadRune()
+		if err != nil {
+			return "", err
+		}
+		if r == '\n' || r == '\r' {
+			break
+		}
+		if r == 127 || r == '\b' {
+			if len(buf) > 0 {
+				buf = buf[:len(buf)-1]
+				fmt.Print("\b \b")
+			}
+			continue
+		}
+		buf = append(buf, r)
+		fmt.Print(string(r))
+	}
+	fmt.Println()
+	return string(buf), nil
+}
+
 // Run launches the interactive REPL.
 func Run() error {
 	if err := checkDeps(); err != nil {
@@ -640,11 +667,17 @@ func Run() error {
 
 // handleCommand executes a ! command. Returns true if repl should quit.
 func saveSession() {
-	reader := bufio.NewReader(os.Stdin)
 	if sessionFile == "" {
-		cprint("Session name (blank for hidden): ")
-		name, _ := reader.ReadString('\n')
+		if sessionName != "" {
+			cprint(fmt.Sprintf("Session name [%s]: ", sessionName))
+		} else {
+			cprint("Session name (blank for hidden): ")
+		}
+		name, _ := readLine()
 		name = strings.TrimSpace(name)
+		if name == "" {
+			name = sessionName
+		}
 		if name != "" {
 			sessionFile = name + ".grimux"
 			sessionName = name
