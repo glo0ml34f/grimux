@@ -183,6 +183,12 @@ func spinner() func() {
 	return func() { close(done) }
 }
 
+// forceEnter prints a newline to ensure the prompt is visible after
+// running external commands while in raw mode.
+func forceEnter() {
+	fmt.Print("\r\n")
+}
+
 // startRaw puts the terminal into raw mode.
 
 func readPassword() (string, error) {
@@ -277,6 +283,7 @@ func Run() error {
 		if err == nil {
 			respPrintln(respSep)
 			respPrintln(reply)
+			forceEnter()
 			respPrintln(respSep)
 		} else {
 			cprintln("openai error: " + err.Error())
@@ -440,6 +447,7 @@ func Run() error {
 						respPrintln(reply)
 						respPrintln(respSep)
 						buffers["%code"] = lastCodeBlock(reply)
+						forceEnter()
 					}
 				}
 				history = append(history, line)
@@ -583,6 +591,7 @@ func handleCommand(cmd string) bool {
 		c := exec.Command("tmux", "list-panes", "-F", "#{pane_id} #{pane_title} #{pane_current_command}")
 		c.Stdout = os.Stdout
 		c.Run()
+		forceEnter()
 		for k, v := range buffers {
 			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
 		}
@@ -657,6 +666,7 @@ func handleCommand(cmd string) bool {
 			buffers[fields[1]] = string(b)
 		}
 		os.Remove(tmp.Name())
+		forceEnter()
 	case "!run":
 		if len(fields) < 2 {
 			usage("!run")
@@ -671,6 +681,7 @@ func handleCommand(cmd string) bool {
 			cmdPrintln("run error: " + err.Error())
 		}
 		cprint(out.String())
+		forceEnter()
 	case "!var":
 		if len(fields) < 3 {
 			usage("!var")
@@ -693,6 +704,7 @@ func handleCommand(cmd string) bool {
 		respPrintln(respSep)
 		respPrintln(reply)
 		respPrintln(respSep)
+		forceEnter()
 	case "!varcode":
 		if len(fields) < 3 {
 			usage("!varcode")
@@ -715,9 +727,9 @@ func handleCommand(cmd string) bool {
 		respPrintln(respSep)
 		respPrintln(reply)
 		respPrintln(respSep)
+		forceEnter()
 	case "!print":
 		if len(fields) < 2 {
-			usage("!print")
 			return false
 		}
 		cprint(buffers[fields[1]])
@@ -758,6 +770,7 @@ func handleCommand(cmd string) bool {
 			cmdPrintln("run_on error: " + err.Error())
 		}
 		buffers[fields[1]] = out.String()
+		forceEnter()
 	case "!ask":
 		if len(fields) < 2 {
 			usage("!ask")
@@ -782,6 +795,9 @@ func handleCommand(cmd string) bool {
 			viewer = "batcat"
 		}
 		args := []string{"-l", "markdown"}
+		if strings.Contains(viewer, "bat") {
+			args = append(args, "--paging=never")
+		}
 		cmd := exec.Command(viewer, args...)
 		cmd.Stdin = strings.NewReader(reply)
 		cmd.Stdout = os.Stdout
@@ -791,6 +807,7 @@ func handleCommand(cmd string) bool {
 		}
 		respPrintln(respSep)
 		buffers["%code"] = lastCodeBlock(reply)
+		forceEnter()
 	case "!help":
 		for _, name := range commandOrder {
 			info := commands[name]
