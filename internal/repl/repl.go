@@ -32,6 +32,12 @@ var prompts = []string{
 	"With playful disdain, lament yet another ridiculous request from the living",
 }
 
+type config struct {
+	APIURL    string `yaml:"api_url"`
+	APIKey    string `yaml:"api_key"`
+	AskPrefix string `yaml:"ask_prefix"`
+}
+
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
 var bufferPattern = regexp.MustCompile(`%[a-zA-Z0-9_]+`)
@@ -50,11 +56,54 @@ var sessionPass string
 // askPrefix is prepended to user prompts when using !ask.
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
 
+func loadConfig() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".grimuxrc"))
+	if err != nil {
+		return
+	}
+	var cfg config
+	scan := bufio.NewScanner(bytes.NewReader(data))
+	for scan.Scan() {
+		line := strings.TrimSpace(scan.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		switch key {
+		case "api_url":
+			cfg.APIURL = val
+		case "api_key":
+			cfg.APIKey = val
+		case "ask_prefix":
+			cfg.AskPrefix = val
+		}
+	}
+	if cfg.APIKey != "" && os.Getenv("OPENAI_API_KEY") == "" && openai.GetSessionAPIKey() == "" {
+		openai.SetSessionAPIKey(cfg.APIKey)
+	}
+	if cfg.APIURL != "" && os.Getenv("OPENAI_API_URL") == "" && openai.GetSessionAPIURL() == "" {
+		openai.SetSessionAPIURL(cfg.APIURL)
+	}
+	if cfg.AskPrefix != "" {
+		askPrefix = cfg.AskPrefix
+	}
+}
+
 type session struct {
 	History []string          `json:"history"`
 	Buffers map[string]string `json:"buffers"`
 	Prompt  string            `json:"prompt"`
 	APIKey  string            `json:"apikey"`
+	APIURL  string            `json:"apiurl"`
 }
 
 const (
@@ -247,6 +296,7 @@ func Run() error {
 	if err := checkDeps(); err != nil {
 		return err
 	}
+	loadConfig()
 	// load session before switching to raw mode
 	reader := bufio.NewReader(os.Stdin)
 	history = []string{}
@@ -278,6 +328,9 @@ func Run() error {
 			}
 			if s.APIKey != "" && os.Getenv("OPENAI_API_KEY") == "" {
 				openai.SetSessionAPIKey(s.APIKey)
+			}
+			if s.APIURL != "" && os.Getenv("OPENAI_API_URL") == "" {
+				openai.SetSessionAPIURL(s.APIURL)
 			}
 		}
 	}
@@ -604,7 +657,7 @@ func saveSession() {
 		pwd, _ := readPassword()
 		sessionPass = pwd
 	}
-	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey()}
+	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL()}
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		if sessionPass == "" {
 			os.WriteFile(sessionFile, b, 0644)
@@ -800,7 +853,7 @@ func handleCommand(cmd string) bool {
 	case "!get_prompt":
 		cmdPrintln(askPrefix)
 	case "!session":
-		s := session{History: history, Buffers: buffers, Prompt: askPrefix}
+		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL()}
 		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 			buffers["%session"] = string(b)
 		}

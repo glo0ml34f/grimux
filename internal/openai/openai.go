@@ -10,19 +10,28 @@ import (
 	"strings"
 )
 
-var apiURL = "https://api.openai.com/v1/chat/completions"
+const defaultAPIURL = "https://api.openai.com/v1/chat/completions"
+
+var sessionAPIURL string
 
 var sessionAPIKey string
 
 // SetSessionAPIKey stores the API key loaded from the session file.
 func SetSessionAPIKey(k string) { sessionAPIKey = k }
 
+// SetSessionAPIURL stores the API URL loaded from the session file.
+func SetSessionAPIURL(u string) { sessionAPIURL = u }
+
 // GetSessionAPIKey returns the API key saved in the current session.
 func GetSessionAPIKey() string { return sessionAPIKey }
+
+// GetSessionAPIURL returns the API URL saved in the current session.
+func GetSessionAPIURL() string { return sessionAPIURL }
 
 // Client interacts with the OpenAI API.
 type Client struct {
 	APIKey     string
+	APIURL     string
 	HTTPClient *http.Client
 }
 
@@ -32,9 +41,9 @@ func NewClient() (*Client, error) {
 	if key == "" {
 		key = sessionAPIKey
 	}
+	reader := bufio.NewReader(os.Stdin)
 	if key == "" {
 		fmt.Print("OpenAI API key: ")
-		reader := bufio.NewReader(os.Stdin)
 		line, err := reader.ReadString('\n')
 		fmt.Println()
 		if err != nil {
@@ -46,7 +55,31 @@ func NewClient() (*Client, error) {
 	if key == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY not set")
 	}
-	return &Client{APIKey: key, HTTPClient: http.DefaultClient}, nil
+
+	url := os.Getenv("OPENAI_API_URL")
+	if url == "" {
+		url = sessionAPIURL
+	}
+	if url == "" {
+		fmt.Printf("OpenAI API URL [%s]: ", defaultAPIURL)
+		line, err := reader.ReadString('\n')
+		fmt.Println()
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			url = defaultAPIURL
+		} else {
+			url = line
+		}
+		sessionAPIURL = url
+	}
+	if url == "" {
+		url = defaultAPIURL
+	}
+
+	return &Client{APIKey: key, APIURL: url, HTTPClient: http.DefaultClient}, nil
 }
 
 type chatMessage struct {
@@ -67,9 +100,6 @@ type chatResponse struct {
 
 // SendPrompt sends the given text as a user message and returns the assistant's reply.
 func (c *Client) SendPrompt(prompt string) (string, error) {
-	if env := os.Getenv("OPENAI_API_URL"); env != "" {
-		apiURL = env
-	}
 	reqBody := chatRequest{
 		Model:    "gpt-4o",
 		Messages: []chatMessage{{Role: "user", Content: prompt}},
@@ -78,7 +108,11 @@ func (c *Client) SendPrompt(prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(b))
+	url := c.APIURL
+	if url == "" {
+		url = defaultAPIURL
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(b))
 	if err != nil {
 		return "", err
 	}
