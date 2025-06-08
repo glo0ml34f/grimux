@@ -45,6 +45,7 @@ var history []string
 
 var sessionFile = ".grimux_session"
 
+// askPrefix is prepended to user prompts when using !ask.
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
 
 type session struct {
@@ -53,11 +54,19 @@ type session struct {
 	Prompt  string            `json:"prompt"`
 }
 
-const grimColor = "\033[38;5;141m"
+const (
+	grimColor = "\033[38;5;141m" // internal grimux messages
+	cmdColor  = "\033[38;5;51m"  // user commands
+	respColor = "\033[38;5;214m" // LLM responses
+)
 
-func colorize(s string) string { return grimColor + s + "\033[0m" }
-func cprintln(s string)        { fmt.Println(colorize(s)) }
-func cprint(s string)          { fmt.Print(colorize(s)) }
+func colorize(color, s string) string { return color + s + "\033[0m" }
+func cprintln(s string)               { fmt.Println(colorize(grimColor, s)) }
+func cprint(s string)                 { fmt.Print(colorize(grimColor, s)) }
+func cmdPrintln(s string)             { fmt.Println(colorize(cmdColor, s)) }
+func respPrintln(s string)            { fmt.Println(colorize(respColor, s)) }
+
+var respSep = colorize(respColor, strings.Repeat("─", 40))
 
 // SetSessionFile changes the path used when loading or saving session state.
 func SetSessionFile(path string) {
@@ -148,6 +157,28 @@ func checkDeps() error {
 	return nil
 }
 
+// spinner displays a cute "thinking" indicator until the returned function is
+// called. It rewrites the same line without printing newlines.
+func spinner() func() {
+	frames := []string{"🤖", "🤖.", "🤖..", "🤖..."}
+	done := make(chan struct{})
+	go func() {
+		i := 0
+		for {
+			select {
+			case <-done:
+				fmt.Print("\r\033[K")
+				return
+			default:
+				fmt.Printf("\r%s", colorize(respColor, frames[i%len(frames)]))
+				time.Sleep(300 * time.Millisecond)
+				i++
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 // startRaw puts the terminal into raw mode.
 
 // Run launches the interactive REPL.
@@ -160,6 +191,7 @@ func Run() error {
 		return fmt.Errorf("raw mode: %w", err)
 	}
 	defer stopRaw(oldState)
+	defer cprintln("So long, and thanks for all the hacks! 🤘")
 
 	reader := bufio.NewReader(os.Stdin)
 	history = []string{}
@@ -185,8 +217,13 @@ func Run() error {
 	} else {
 		cprintln("Checking OpenAI integration... ✅")
 		p := prompts[rand.Intn(len(prompts))]
-		if reply, err := client.SendPrompt(p); err == nil {
-			cprintln(reply)
+		stop := spinner()
+		reply, err := client.SendPrompt(p)
+		stop()
+		if err == nil {
+			respPrintln(respSep)
+			respPrintln(reply)
+			respPrintln(respSep)
 		} else {
 			cprintln("openai error: " + err.Error())
 		}
@@ -332,14 +369,18 @@ func Run() error {
 			} else {
 				client, err := openai.NewClient()
 				if err != nil {
-					cprintln(err.Error())
+					cmdPrintln(err.Error())
 				} else {
 					promptText := replaceBufferRefs(replacePaneRefs(line))
+					stop := spinner()
 					reply, err := client.SendPrompt(promptText)
+					stop()
 					if err != nil {
 						cprintln("openai error: " + err.Error())
 					} else {
-						cprintln(reply)
+						respPrintln(respSep)
+						respPrintln(reply)
+						respPrintln(respSep)
 						buffers["%code"] = lastCodeBlock(reply)
 					}
 				}
@@ -440,7 +481,7 @@ func handleCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
 	usage := func(name string) {
 		if info, ok := commands[name]; ok {
-			cprintln("usage: " + info.Usage + " - " + info.Desc)
+			cmdPrintln("usage: " + info.Usage + " - " + info.Desc)
 		}
 	}
 	switch fields[0] {
@@ -454,7 +495,7 @@ func handleCommand(cmd string) bool {
 		c.Stdout = os.Stdout
 		c.Run()
 		for k, v := range buffers {
-			cprintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
+			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
 		}
 	case "!capture":
 		if len(fields) < 3 {
@@ -463,7 +504,7 @@ func handleCommand(cmd string) bool {
 		}
 		out, err := capturePane(fields[2])
 		if err != nil {
-			cprintln("capture error: " + err.Error())
+			cmdPrintln("capture error: " + err.Error())
 			return false
 		}
 		buffers[fields[1]] = out
@@ -475,11 +516,11 @@ func handleCommand(cmd string) bool {
 		}
 		data, ok := buffers[fields[1]]
 		if !ok {
-			cprintln("unknown buffer")
+			cmdPrintln("unknown buffer")
 			return false
 		}
 		if err := os.WriteFile(fields[2], []byte(data), 0644); err != nil {
-			cprintln("save error: " + err.Error())
+			cmdPrintln("save error: " + err.Error())
 		}
 	case "!file":
 		if len(fields) < 2 {
@@ -488,7 +529,7 @@ func handleCommand(cmd string) bool {
 		}
 		b, err := os.ReadFile(fields[1])
 		if err != nil {
-			cprintln("file error: " + err.Error())
+			cmdPrintln("file error: " + err.Error())
 			return false
 		}
 		buffers["%file"] = string(b)
@@ -499,16 +540,16 @@ func handleCommand(cmd string) bool {
 		}
 		data, ok := buffers[fields[1]]
 		if !ok {
-			cprintln("unknown buffer")
+			cmdPrintln("unknown buffer")
 			return false
 		}
 		tmp, err := os.CreateTemp("", "grimux-edit-*.tmp")
 		if err != nil {
-			cprintln("tempfile error: " + err.Error())
+			cmdPrintln("tempfile error: " + err.Error())
 			return false
 		}
 		if _, err := tmp.WriteString(data); err != nil {
-			cprintln("write temp error: " + err.Error())
+			cmdPrintln("write temp error: " + err.Error())
 			return false
 		}
 		tmp.Close()
@@ -521,7 +562,7 @@ func handleCommand(cmd string) bool {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			cprintln("vim error: " + err.Error())
+			cmdPrintln("vim error: " + err.Error())
 		}
 		if b, err := os.ReadFile(tmp.Name()); err == nil {
 			buffers[fields[1]] = string(b)
@@ -538,7 +579,7 @@ func handleCommand(cmd string) bool {
 		c.Stdout = &out
 		c.Stderr = &out
 		if err := c.Run(); err != nil {
-			cprintln("run error: " + err.Error())
+			cmdPrintln("run error: " + err.Error())
 		}
 		cprint(out.String())
 	case "!var":
@@ -548,17 +589,21 @@ func handleCommand(cmd string) bool {
 		}
 		client, err := openai.NewClient()
 		if err != nil {
-			cprintln(err.Error())
+			cmdPrintln(err.Error())
 			return false
 		}
 		promptText := replaceBufferRefs(replacePaneRefs(strings.Join(fields[2:], " ")))
+		stop := spinner()
 		reply, err := client.SendPrompt(promptText)
+		stop()
 		if err != nil {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
 		buffers[fields[1]] = reply
-		cprintln(reply)
+		respPrintln(respSep)
+		respPrintln(reply)
+		respPrintln(respSep)
 	case "!varcode":
 		if len(fields) < 3 {
 			usage("!varcode")
@@ -570,13 +615,17 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		promptText := replaceBufferRefs(replacePaneRefs(strings.Join(fields[2:], " ")))
+		stop := spinner()
 		reply, err := client.SendPrompt(promptText)
+		stop()
 		if err != nil {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
 		buffers[fields[1]] = lastCodeBlock(reply)
-		cprintln(reply)
+		respPrintln(respSep)
+		respPrintln(reply)
+		respPrintln(respSep)
 	case "!print":
 		if len(fields) < 2 {
 			usage("!print")
@@ -597,10 +646,10 @@ func handleCommand(cmd string) bool {
 		if v, ok := buffers[fields[1]]; ok {
 			askPrefix = v
 		} else {
-			cprintln("unknown buffer")
+			cmdPrintln("unknown buffer")
 		}
 	case "!get_prompt":
-		cprintln(askPrefix)
+		cmdPrintln(askPrefix)
 	case "!session":
 		s := session{History: history, Buffers: buffers, Prompt: askPrefix}
 		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
@@ -617,7 +666,7 @@ func handleCommand(cmd string) bool {
 		c.Stdout = &out
 		c.Stderr = &out
 		if err := c.Run(); err != nil {
-			cprintln("run_on error: " + err.Error())
+			cmdPrintln("run_on error: " + err.Error())
 		}
 		buffers[fields[1]] = out.String()
 	case "!ask":
@@ -627,12 +676,14 @@ func handleCommand(cmd string) bool {
 		}
 		client, err := openai.NewClient()
 		if err != nil {
-			cprintln(err.Error())
+			cmdPrintln(err.Error())
 			return false
 		}
 		promptText := replaceBufferRefs(replacePaneRefs(strings.Join(fields[1:], " ")))
 		promptText = askPrefix + promptText
+		stop := spinner()
 		reply, err := client.SendPrompt(promptText)
+		stop()
 		if err != nil {
 			cprintln("openai error: " + err.Error())
 			return false
@@ -644,17 +695,19 @@ func handleCommand(cmd string) bool {
 		cmd := exec.Command(viewer, "-l", "markdown")
 		cmd.Stdin = strings.NewReader(reply)
 		cmd.Stdout = os.Stdout
+		respPrintln(respSep)
 		if err := cmd.Run(); err != nil {
-			cprintln(viewer + " error: " + err.Error())
+			cmdPrintln(viewer + " error: " + err.Error())
 		}
+		respPrintln(respSep)
 		buffers["%code"] = lastCodeBlock(reply)
 	case "!help":
 		for _, name := range commandOrder {
 			info := commands[name]
-			cprintln(info.Usage + " - " + info.Desc)
+			cmdPrintln(info.Usage + " - " + info.Desc)
 		}
 	default:
-		cprintln("unknown command")
+		cmdPrintln("unknown command")
 	}
 	return false
 }
