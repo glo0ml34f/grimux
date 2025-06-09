@@ -104,6 +104,7 @@ type session struct {
 	Prompt  string            `json:"prompt"`
 	APIKey  string            `json:"apikey"`
 	APIURL  string            `json:"apiurl"`
+	Model   string            `json:"model"`
 }
 
 const (
@@ -146,8 +147,9 @@ type commandInfo struct {
 
 var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
-	"!gen", "!code", "!load", "!edit", "!run", "!cat",
-	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow", "!help",
+	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
+	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!help",
 }
 
 var commands = map[string]commandInfo{
@@ -157,11 +159,12 @@ var commands = map[string]commandInfo{
 	"!observe":    {Usage: "!observe <buffer> <pane-id>", Desc: "capture a pane into a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane-id>", "tmux pane id"}}},
 	"!save":       {Usage: "!save <buffer> <file>", Desc: "save buffer to file", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<file>", "path to file"}}},
 	"!load":       {Usage: "!load <path>", Desc: "load file into %file", Params: []paramInfo{{"<path>", "file path"}}},
+	"!file":       {Usage: "!file <path> [buffer]", Desc: "load file into buffer", Params: []paramInfo{{"<path>", "file path"}, {"[buffer]", "optional buffer"}}},
 	"!edit":       {Usage: "!edit <buffer>", Desc: "edit buffer in $EDITOR", Params: []paramInfo{{"<buffer>", "buffer name"}}},
-	"!run":        {Usage: "!run <command>", Desc: "run shell command", Params: []paramInfo{{"<command>", "command to run"}}},
+	"!run":        {Usage: "!run [buffer] <command>", Desc: "run shell command", Params: []paramInfo{{"[buffer]", "optional buffer"}, {"<command>", "command to run"}}},
 	"!gen":        {Usage: "!gen <buffer> <prompt>", Desc: "AI prompt into buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
 	"!code":       {Usage: "!code <buffer> <prompt>", Desc: "AI prompt, store code", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
-	"!cat":         {Usage: "!cat <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!cat":        {Usage: "!cat <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!set":        {Usage: "!set <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
 	"!prefix":     {Usage: "!prefix <buffer>", Desc: "set prefix from buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!unset":      {Usage: "!unset <buffer>", Desc: "clear buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
@@ -169,6 +172,14 @@ var commands = map[string]commandInfo{
 	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
 	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
 	"!flow":       {Usage: "!flow <buf1> [buf2 ... buf10]", Desc: "chain prompts using buffers", Params: []paramInfo{{"<buf>", "buffer name"}}},
+	"!grep":       {Usage: "!grep <regex> [buffers...]", Desc: "search buffers for regex", Params: []paramInfo{{"<regex>", "regular expression"}, {"[buffers...]", "optional buffers"}}},
+	"!model":      {Usage: "!model <name>", Desc: "set OpenAI model", Params: []paramInfo{{"<name>", "model name"}}},
+	"!pwd":        {Usage: "!pwd", Desc: "print working directory"},
+	"!cd":         {Usage: "!cd <dir>", Desc: "change working directory", Params: []paramInfo{{"<dir>", "directory"}}},
+	"!setenv":     {Usage: "!setenv <var> <buffer>", Desc: "set env from buffer", Params: []paramInfo{{"<var>", "variable"}, {"<buffer>", "buffer name"}}},
+	"!getenv":     {Usage: "!getenv <var> <buffer>", Desc: "store env in buffer", Params: []paramInfo{{"<var>", "variable"}, {"<buffer>", "buffer name"}}},
+	"!env":        {Usage: "!env", Desc: "list environment variables"},
+	"!sum":        {Usage: "!sum <buffer>", Desc: "summarize buffer with LLM", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 }
@@ -360,6 +371,9 @@ func Run() error {
 			if s.APIURL != "" && os.Getenv("OPENAI_API_URL") == "" {
 				openai.SetSessionAPIURL(s.APIURL)
 			}
+			if s.Model != "" {
+				openai.SetModelName(s.Model)
+			}
 		}
 	}
 	if sessionFile != "" && sessionName == "" {
@@ -426,7 +440,7 @@ func Run() error {
 	autocomplete := func() {
 		prefix := string(lineBuf)
 		fields := strings.Fields(prefix)
-		if len(fields) > 0 && (fields[0] == "!save" || fields[0] == "!load") {
+		if len(fields) > 0 && (fields[0] == "!save" || fields[0] == "!load" || fields[0] == "!file") {
 			if len(fields) >= 2 && !strings.HasSuffix(prefix, " ") {
 				pattern := fields[len(fields)-1] + "*"
 				matches, _ := filepath.Glob(pattern)
@@ -443,6 +457,28 @@ func Run() error {
 					printLine()
 					return
 				}
+			}
+		}
+		if len(fields) > 0 && strings.HasPrefix(fields[len(fields)-1], "%") && !strings.HasSuffix(prefix, " ") {
+			last := fields[len(fields)-1]
+			matches := []string{}
+			for name := range buffers {
+				if strings.HasPrefix(name, last) {
+					matches = append(matches, name)
+				}
+			}
+			if len(matches) == 1 {
+				fields[len(fields)-1] = matches[0]
+				lineBuf = []rune(strings.Join(fields, " "))
+				cursor = len(lineBuf)
+				printLine()
+				return
+			}
+			if len(matches) > 1 {
+				cprintln("")
+				cprintln(strings.Join(matches, "  "))
+				printLine()
+				return
 			}
 		}
 		matches := []string{}
@@ -691,7 +727,7 @@ func saveSession() {
 		pwd, _ := readPassword()
 		sessionPass = pwd
 	}
-	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL()}
+	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName()}
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		if sessionPass == "" {
 			os.WriteFile(sessionFile, b, 0644)
@@ -766,6 +802,22 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		buffers["%file"] = string(b)
+	case "!file":
+		if len(fields) < 2 {
+			usage("!file")
+			return false
+		}
+		path := fields[1]
+		bufName := "%file"
+		if len(fields) >= 3 {
+			bufName = fields[2]
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			cmdPrintln("file error: " + err.Error())
+			return false
+		}
+		buffers[bufName] = string(b)
 	case "!edit":
 		if len(fields) < 2 {
 			usage("!edit")
@@ -807,7 +859,17 @@ func handleCommand(cmd string) bool {
 			usage("!run")
 			return false
 		}
-		cmdStr := replaceBufferRefs(strings.Join(fields[1:], " "))
+		start := 1
+		bufName := "%cmd"
+		if strings.HasPrefix(fields[1], "%") {
+			bufName = fields[1]
+			start = 2
+			if len(fields) < 3 {
+				usage("!run")
+				return false
+			}
+		}
+		cmdStr := replaceBufferRefs(strings.Join(fields[start:], " "))
 		c := exec.Command("bash", "-c", cmdStr)
 		var out bytes.Buffer
 		c.Stdout = &out
@@ -815,6 +877,7 @@ func handleCommand(cmd string) bool {
 		if err := c.Run(); err != nil {
 			cmdPrintln("run error: " + err.Error())
 		}
+		buffers[bufName] = out.String()
 		cprint(out.String())
 		forceEnter()
 	case "!gen":
@@ -893,7 +956,7 @@ func handleCommand(cmd string) bool {
 	case "!get_prompt":
 		cmdPrintln(askPrefix)
 	case "!session":
-		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL()}
+		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName()}
 		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 			buffers["%session"] = string(b)
 		}
@@ -956,6 +1019,104 @@ func handleCommand(cmd string) bool {
 		respPrintln(reply)
 		respPrintln(respSep)
 		buffers["%code"] = lastCodeBlock(reply)
+		forceEnter()
+	case "!grep":
+		if len(fields) < 2 {
+			usage("!grep")
+			return false
+		}
+		re, err := regexp.Compile(fields[1])
+		if err != nil {
+			cmdPrintln("regex error: " + err.Error())
+			return false
+		}
+		bufs := fields[2:]
+		if len(bufs) == 0 {
+			for name := range buffers {
+				bufs = append(bufs, name)
+			}
+		}
+		for _, name := range bufs {
+			data, ok := buffers[name]
+			if !ok {
+				cmdPrintln("unknown buffer")
+				continue
+			}
+			scan := bufio.NewScanner(strings.NewReader(data))
+			lineNo := 1
+			for scan.Scan() {
+				line := scan.Text()
+				if re.MatchString(line) {
+					cmdPrintln(fmt.Sprintf("%s:%d:%s", name, lineNo, line))
+				}
+				lineNo++
+			}
+		}
+	case "!model":
+		if len(fields) < 2 {
+			usage("!model")
+			return false
+		}
+		openai.SetModelName(fields[1])
+	case "!pwd":
+		if dir, err := os.Getwd(); err == nil {
+			cmdPrintln(dir)
+		}
+	case "!cd":
+		if len(fields) < 2 {
+			usage("!cd")
+			return false
+		}
+		if err := os.Chdir(fields[1]); err != nil {
+			cmdPrintln("cd error: " + err.Error())
+		}
+	case "!setenv":
+		if len(fields) < 3 {
+			usage("!setenv")
+			return false
+		}
+		val, ok := buffers[fields[2]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		os.Setenv(fields[1], val)
+	case "!getenv":
+		if len(fields) < 3 {
+			usage("!getenv")
+			return false
+		}
+		buffers[fields[2]] = os.Getenv(fields[1])
+	case "!env":
+		for _, e := range os.Environ() {
+			cmdPrintln(e)
+		}
+	case "!sum":
+		if len(fields) < 2 {
+			usage("!sum")
+			return false
+		}
+		client, err := openai.NewClient()
+		if err != nil {
+			cmdPrintln(err.Error())
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		stop := spinner()
+		reply, err := client.SendPrompt("Summarize the following text in a concise way:\n" + data)
+		stop()
+		if err != nil {
+			cprintln("openai error: " + err.Error())
+			return false
+		}
+		buffers[fields[1]] = reply
+		respPrintln(respSep)
+		respPrintln(reply)
+		respPrintln(respSep)
 		forceEnter()
 	case "!a":
 		if len(fields) < 2 {

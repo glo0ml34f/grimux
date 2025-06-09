@@ -28,3 +28,12 @@ func TestSendPrompt(t *testing.T) {
 		t.Fatalf("unexpected reply: %q", reply)
 	}
 }
+
+func TestSetModelName(t *testing.T) {
+	old := GetModelName()
+	SetModelName("dummy")
+	if GetModelName() != "dummy" {
+		t.Fatalf("model not set")
+	}
+	SetModelName(old)
+}
