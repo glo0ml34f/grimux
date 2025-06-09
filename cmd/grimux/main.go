@@ -14,6 +14,7 @@ var version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "print version")
 	serious := flag.Bool("serious", false, "start in serious mode")
+	audit := flag.Bool("audit", false, "enable audit logging")
 	flag.Parse()
 
 	if *showVersion {
@@ -21,6 +22,7 @@ func main() {
 		return
 	}
 	repl.SetSeriousMode(*serious)
+	repl.SetAuditMode(*audit)
 	home, _ := os.UserHomeDir()
 	repl.SetBanFile(filepath.Join(home, ".grimux_banned"))
 	if flag.NArg() > 0 {
