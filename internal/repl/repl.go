@@ -53,7 +53,7 @@ var sessionFile string
 var sessionName string
 var sessionPass string
 
-// askPrefix is prepended to user prompts when using !ask.
+// askPrefix is prepended to user prompts when using !a.
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
 
 func loadConfig() {
@@ -145,30 +145,31 @@ type commandInfo struct {
 }
 
 var commandOrder = []string{
-	"!capture", "!list", "!quit", "!exit", "!ask", "!save",
-	"!var", "!varcode", "!file", "!edit", "!run", "!print",
-	"!prompt", "!set_prompt", "!get_prompt", "!session", "!run_on", "!flow", "!help",
+	"!observe", "!ls", "!quit", "!x", "!a", "!save",
+	"!gen", "!code", "!load", "!edit", "!run", "cat",
+	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow", "!help",
 }
 
 var commands = map[string]commandInfo{
 	"!quit":       {Usage: "!quit", Desc: "save session and quit"},
-	"!exit":       {Usage: "!exit", Desc: "exit immediately"},
-	"!list":       {Usage: "!list", Desc: "list panes and buffers"},
-	"!capture":    {Usage: "!capture <buffer> <pane-id>", Desc: "capture a pane into a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane-id>", "tmux pane id"}}},
+	"!x":          {Usage: "!x", Desc: "exit immediately"},
+	"!ls":         {Usage: "!ls", Desc: "list panes and buffers"},
+	"!observe":    {Usage: "!observe <buffer> <pane-id>", Desc: "capture a pane into a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane-id>", "tmux pane id"}}},
 	"!save":       {Usage: "!save <buffer> <file>", Desc: "save buffer to file", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<file>", "path to file"}}},
-	"!file":       {Usage: "!file <path>", Desc: "load file into %file", Params: []paramInfo{{"<path>", "file path"}}},
+	"!load":       {Usage: "!load <path>", Desc: "load file into %file", Params: []paramInfo{{"<path>", "file path"}}},
 	"!edit":       {Usage: "!edit <buffer>", Desc: "edit buffer in $EDITOR", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!run":        {Usage: "!run <command>", Desc: "run shell command", Params: []paramInfo{{"<command>", "command to run"}}},
-	"!var":        {Usage: "!var <buffer> <prompt>", Desc: "AI prompt into buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
-	"!varcode":    {Usage: "!varcode <buffer> <prompt>", Desc: "AI prompt, store code", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
-	"!print":      {Usage: "!print <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
-	"!prompt":     {Usage: "!prompt <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
-	"!set_prompt": {Usage: "!set_prompt <buffer>", Desc: "set prefix from buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!gen":        {Usage: "!gen <buffer> <prompt>", Desc: "AI prompt into buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
+	"!code":       {Usage: "!code <buffer> <prompt>", Desc: "AI prompt, store code", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
+	"cat":         {Usage: "cat <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!set":        {Usage: "!set <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
+	"!prefix":     {Usage: "!prefix <buffer>", Desc: "set prefix from buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!unset":      {Usage: "!unset <buffer>", Desc: "clear buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
 	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
 	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
 	"!flow":       {Usage: "!flow <buf1> [buf2 ... buf10]", Desc: "chain prompts using buffers", Params: []paramInfo{{"<buf>", "buffer name"}}},
-	"!ask":        {Usage: "!ask <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
+	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 }
 
@@ -425,7 +426,7 @@ func Run() error {
 	autocomplete := func() {
 		prefix := string(lineBuf)
 		fields := strings.Fields(prefix)
-		if len(fields) > 0 && (fields[0] == "!save" || fields[0] == "!file") {
+		if len(fields) > 0 && (fields[0] == "!save" || fields[0] == "!load") {
 			if len(fields) >= 2 && !strings.HasSuffix(prefix, " ") {
 				pattern := fields[len(fields)-1] + "*"
 				matches, _ := filepath.Glob(pattern)
@@ -719,9 +720,9 @@ func handleCommand(cmd string) bool {
 	case "!quit":
 		saveSession()
 		return true
-	case "!exit":
+	case "!x":
 		return true
-	case "!list":
+	case "!ls":
 		c := exec.Command("tmux", "list-panes", "-F", "#{pane_id} #{pane_title} #{pane_current_command}")
 		c.Stdout = os.Stdout
 		c.Run()
@@ -729,9 +730,9 @@ func handleCommand(cmd string) bool {
 		for k, v := range buffers {
 			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
 		}
-	case "!capture":
+	case "!observe":
 		if len(fields) < 3 {
-			usage("!capture")
+			usage("!observe")
 			return false
 		}
 		out, err := capturePane(fields[2])
@@ -754,9 +755,9 @@ func handleCommand(cmd string) bool {
 		if err := os.WriteFile(fields[2], []byte(data), 0644); err != nil {
 			cmdPrintln("save error: " + err.Error())
 		}
-	case "!file":
+	case "!load":
 		if len(fields) < 2 {
-			usage("!file")
+			usage("!load")
 			return false
 		}
 		b, err := os.ReadFile(fields[1])
@@ -816,9 +817,9 @@ func handleCommand(cmd string) bool {
 		}
 		cprint(out.String())
 		forceEnter()
-	case "!var":
+	case "!gen":
 		if len(fields) < 3 {
-			usage("!var")
+			usage("!gen")
 			return false
 		}
 		client, err := openai.NewClient()
@@ -839,9 +840,9 @@ func handleCommand(cmd string) bool {
 		respPrintln(reply)
 		respPrintln(respSep)
 		forceEnter()
-	case "!varcode":
+	case "!code":
 		if len(fields) < 3 {
-			usage("!varcode")
+			usage("!code")
 			return false
 		}
 		client, err := openai.NewClient()
@@ -862,20 +863,20 @@ func handleCommand(cmd string) bool {
 		respPrintln(reply)
 		respPrintln(respSep)
 		forceEnter()
-	case "!print":
+	case "cat":
 		if len(fields) < 2 {
 			return false
 		}
 		cprint(buffers[fields[1]])
-	case "!prompt":
+	case "!set":
 		if len(fields) < 3 {
-			usage("!prompt")
+			usage("!set")
 			return false
 		}
 		buffers[fields[1]] = strings.Join(fields[2:], " ")
-	case "!set_prompt":
+	case "!prefix":
 		if len(fields) < 2 {
-			usage("!set_prompt")
+			usage("!prefix")
 			return false
 		}
 		if v, ok := buffers[fields[1]]; ok {
@@ -883,6 +884,12 @@ func handleCommand(cmd string) bool {
 		} else {
 			cmdPrintln("unknown buffer")
 		}
+	case "!unset":
+		if len(fields) < 2 {
+			usage("!unset")
+			return false
+		}
+		buffers[fields[1]] = ""
 	case "!get_prompt":
 		cmdPrintln(askPrefix)
 	case "!session":
@@ -950,9 +957,9 @@ func handleCommand(cmd string) bool {
 		respPrintln(respSep)
 		buffers["%code"] = lastCodeBlock(reply)
 		forceEnter()
-	case "!ask":
+	case "!a":
 		if len(fields) < 2 {
-			usage("!ask")
+			usage("!a")
 			return false
 		}
 		client, err := openai.NewClient()
