@@ -44,6 +44,14 @@ func TestReplaceBufferRefs(t *testing.T) {
 	}
 }
 
+func TestReplaceBufferRefsOutput(t *testing.T) {
+	buffers["%@"] = "output"
+	got := replaceBufferRefs("use %@ here")
+	if got != "use output here" {
+		t.Fatalf("unexpected output buffer replace: %q", got)
+	}
+}
+
 func TestLastCodeBlock(t *testing.T) {
 	text := "``go\nfirst\n```\ntext\n```python\nsecond\n```"
 	code := lastCodeBlock(text)
