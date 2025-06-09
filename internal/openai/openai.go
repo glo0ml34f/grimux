@@ -12,6 +12,9 @@ import (
 
 const defaultAPIURL = "https://api.openai.com/v1/chat/completions"
 
+// ModelName controls which OpenAI model is used for requests.
+var ModelName = "gpt-4o"
+
 var sessionAPIURL string
 
 var sessionAPIKey string
@@ -27,6 +30,12 @@ func GetSessionAPIKey() string { return sessionAPIKey }
 
 // GetSessionAPIURL returns the API URL saved in the current session.
 func GetSessionAPIURL() string { return sessionAPIURL }
+
+// SetModelName sets the OpenAI model name used by SendPrompt.
+func SetModelName(n string) { ModelName = n }
+
+// GetModelName returns the current OpenAI model name.
+func GetModelName() string { return ModelName }
 
 // Client interacts with the OpenAI API.
 type Client struct {
@@ -101,7 +110,7 @@ type chatResponse struct {
 // SendPrompt sends the given text as a user message and returns the assistant's reply.
 func (c *Client) SendPrompt(prompt string) (string, error) {
 	reqBody := chatRequest{
-		Model:    "gpt-4o",
+		Model:    ModelName,
 		Messages: []chatMessage{{Role: "user", Content: prompt}},
 	}
 	b, err := json.Marshal(reqBody)
