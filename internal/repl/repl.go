@@ -1502,7 +1502,7 @@ func handleCommand(cmd string) bool {
 			cmdPrintln("figlet not installed")
 			return false
 		}
-		cmd := exec.Command("figlet", "-f", "gothic", text)
+		cmd := exec.Command("figlet", "-f", "smshadow", text)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			cmdPrintln("figlet error: " + err.Error())
