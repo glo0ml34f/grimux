@@ -146,7 +146,7 @@ type commandInfo struct {
 
 var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
-	"!gen", "!code", "!load", "!edit", "!run", "cat",
+	"!gen", "!code", "!load", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow", "!help",
 }
 
@@ -161,7 +161,7 @@ var commands = map[string]commandInfo{
 	"!run":        {Usage: "!run <command>", Desc: "run shell command", Params: []paramInfo{{"<command>", "command to run"}}},
 	"!gen":        {Usage: "!gen <buffer> <prompt>", Desc: "AI prompt into buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
 	"!code":       {Usage: "!code <buffer> <prompt>", Desc: "AI prompt, store code", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
-	"cat":         {Usage: "cat <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!cat":         {Usage: "!cat <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!set":        {Usage: "!set <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
 	"!prefix":     {Usage: "!prefix <buffer>", Desc: "set prefix from buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!unset":      {Usage: "!unset <buffer>", Desc: "clear buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
@@ -863,7 +863,7 @@ func handleCommand(cmd string) bool {
 		respPrintln(reply)
 		respPrintln(respSep)
 		forceEnter()
-	case "cat":
+	case "!cat":
 		if len(fields) < 2 {
 			return false
 		}
