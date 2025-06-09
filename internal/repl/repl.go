@@ -91,10 +91,12 @@ var emptyCount int
 var banFile string
 
 // askPrefix is prepended to user prompts when using !a.
-var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
+const defaultAskPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
+
+var askPrefix = defaultAskPrefix
 
 // chatPrefix is used when the user types plain text without a command.
-const chatPrefix = "You are Grimux the hacking demon savant, you are trapped by the user for the next 1000 years to do their hacking bidding. You are hilarious but reluctant to help due to the principal of the matter, but otherwise generally do provide the most succinct pithy response you can that still gives the user what the need to complete their request of you. Grimux you will abide the following: "
+const chatPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Provide succinct responses: "
 
 func loadConfig() {
 	home, err := os.UserHomeDir()
@@ -212,7 +214,7 @@ type commandInfo struct {
 var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
-	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
+	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
 	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!game", "!help", "!helpme",
 }
 
@@ -230,7 +232,8 @@ var commands = map[string]commandInfo{
 	"!code":       {Usage: "!code <buffer> <prompt>", Desc: "AI prompt, store code", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<prompt>", "text prompt"}}},
 	"!cat":        {Usage: "!cat <buffer>", Desc: "print buffer contents", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!set":        {Usage: "!set <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
-	"!prefix":     {Usage: "!prefix <buffer>", Desc: "set prefix from buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!prefix":     {Usage: "!prefix <buffer|file>", Desc: "set prefix from buffer or file", Params: []paramInfo{{"<buffer|file>", "buffer name or path"}}},
+	"!reset":      {Usage: "!reset", Desc: "reset session and prefix"},
 	"!unset":      {Usage: "!unset <buffer>", Desc: "clear buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
 	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
@@ -771,6 +774,31 @@ func Run() error {
 		return true
 	}
 
+	currentParam := func() (*paramInfo, bool) {
+		line := string(lineBuf)
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0][0] != '!' {
+			return nil, false
+		}
+		info, ok := commands[fields[0]]
+		if !ok {
+			return nil, false
+		}
+		var idx int
+		if len(fields) == 1 {
+			idx = 0
+		} else if strings.HasSuffix(line, " ") {
+			idx = len(fields) - 1
+		} else {
+			idx = len(fields) - 2
+		}
+		if idx < 0 || idx >= len(info.Params) {
+			return nil, false
+		}
+		p := info.Params[idx]
+		return &p, true
+	}
+
 	for {
 		r, _, err := reader.ReadRune()
 		if err != nil {
@@ -858,6 +886,12 @@ func Run() error {
 			lastQuestion = false
 			cprintln("")
 			return nil
+		case 7: // Ctrl+G start command
+			lastQuestion = false
+			lineBuf = []rune{'!'}
+			cursor = 1
+			printLine()
+			autocomplete()
 		case 127: // Backspace
 			if cursor > 0 {
 				lastQuestion = false
@@ -867,6 +901,29 @@ func Run() error {
 			}
 		case 9: // Tab
 			lastQuestion = false
+			if p, ok := currentParam(); ok && strings.Contains(p.Name, "buffer") {
+				line := string(lineBuf)
+				fields := strings.Fields(line)
+				var last string
+				if strings.HasSuffix(line, " ") || len(fields) <= 1 {
+					last = ""
+				} else {
+					last = fields[len(fields)-1]
+				}
+				if last == "" {
+					lineBuf = append(lineBuf, '%')
+					cursor++
+					printLine()
+				} else if !strings.HasPrefix(last, "%") {
+					prefixLen := len(lineBuf) - len([]rune(last))
+					lineBuf = append(lineBuf[:prefixLen], append([]rune{'%'}, lineBuf[prefixLen:]...)...)
+					cursor++
+					printLine()
+				}
+			}
+			if paramHelp() {
+				lastQuestion = true
+			}
 			autocomplete()
 		case 18: // Ctrl+R reverse search
 			lastQuestion = false
@@ -1208,11 +1265,35 @@ func handleCommand(cmd string) bool {
 			usage("!prefix")
 			return false
 		}
-		if v, ok := buffers[fields[1]]; ok {
-			askPrefix = v
+		src := fields[1]
+		if strings.HasPrefix(src, "%") {
+			if v, ok := buffers[src]; ok {
+				askPrefix = v
+			} else {
+				cmdPrintln("unknown buffer")
+				return false
+			}
 		} else {
-			cmdPrintln("unknown buffer")
+			b, err := os.ReadFile(src)
+			if err != nil {
+				cmdPrintln("file error: " + err.Error())
+				return false
+			}
+			askPrefix = string(b)
 		}
+	case "!reset":
+		askPrefix = defaultAskPrefix
+		history = []string{}
+		buffers = map[string]string{"%file": "", "%code": "", "%@": ""}
+		sessionFile = ""
+		sessionName = ""
+		sessionPass = ""
+		highScore = 0
+		openai.SetSessionAPIKey("")
+		openai.SetSessionAPIURL("")
+		auditLog = nil
+		auditSummary = ""
+		cmdPrintln("session reset")
 	case "!unset":
 		if len(fields) < 2 {
 			usage("!unset")
@@ -1470,7 +1551,7 @@ func handleCommand(cmd string) bool {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
-		viewer := os.Getenv("PAGER")
+		viewer := os.Getenv("VIEWER")
 		if viewer == "" {
 			viewer = "batcat"
 		}
