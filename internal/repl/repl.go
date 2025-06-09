@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +46,7 @@ var codeBlockPattern = regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]+)\n(.*?)\n```"
 var buffers = map[string]string{
 	"%file": "",
 	"%code": "",
+	"%@":    "",
 }
 
 var history []string
@@ -52,6 +54,7 @@ var history []string
 var sessionFile string
 var sessionName string
 var sessionPass string
+var highScore int
 
 // askPrefix is prepended to user prompts when using !a.
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
@@ -99,12 +102,13 @@ func loadConfig() {
 }
 
 type session struct {
-	History []string          `json:"history"`
-	Buffers map[string]string `json:"buffers"`
-	Prompt  string            `json:"prompt"`
-	APIKey  string            `json:"apikey"`
-	APIURL  string            `json:"apiurl"`
-	Model   string            `json:"model"`
+	History   []string          `json:"history"`
+	Buffers   map[string]string `json:"buffers"`
+	Prompt    string            `json:"prompt"`
+	APIKey    string            `json:"apikey"`
+	APIURL    string            `json:"apiurl"`
+	Model     string            `json:"model"`
+	HighScore int               `json:"high_score,omitempty"`
 }
 
 const (
@@ -116,13 +120,25 @@ const (
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
-func cprintln(s string)               { fmt.Println(colorize(grimColor, s)) }
-func cprint(s string)                 { fmt.Print(colorize(grimColor, s)) }
-func cmdPrintln(s string)             { fmt.Println(colorize(cmdColor, s)) }
-func respPrintln(s string)            { fmt.Println(colorize(respColor, s)) }
-func successPrintln(s string)         { fmt.Println(colorize(successColor, s)) }
-func warnPrintln(s string)            { fmt.Println(colorize(warnColor, s)) }
-func ok() string                      { return colorize(successColor, "✅") }
+
+var outputCapture *bytes.Buffer
+
+func captureOut(text string, newline bool) {
+	if outputCapture != nil {
+		outputCapture.WriteString(text)
+		if newline {
+			outputCapture.WriteByte('\n')
+		}
+	}
+}
+
+func cprintln(s string)       { captureOut(s, true); fmt.Println(colorize(grimColor, s)) }
+func cprint(s string)         { captureOut(s, false); fmt.Print(colorize(grimColor, s)) }
+func cmdPrintln(s string)     { captureOut(s, true); fmt.Println(colorize(cmdColor, s)) }
+func respPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(respColor, s)) }
+func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(successColor, s)) }
+func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, s)) }
+func ok() string              { return colorize(successColor, "✅") }
 
 var respSep = colorize(respColor, strings.Repeat("─", 40))
 
@@ -149,7 +165,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!help",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!game", "!help",
 }
 
 var commands = map[string]commandInfo{
@@ -180,6 +196,8 @@ var commands = map[string]commandInfo{
 	"!getenv":     {Usage: "!getenv <var> <buffer>", Desc: "store env in buffer", Params: []paramInfo{{"<var>", "variable"}, {"<buffer>", "buffer name"}}},
 	"!env":        {Usage: "!env", Desc: "list environment variables"},
 	"!sum":        {Usage: "!sum <buffer>", Desc: "summarize buffer with LLM", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!rand":       {Usage: "!rand <min> <max> <buffer>", Desc: "store random number", Params: []paramInfo{{"<min>", "min int"}, {"<max>", "max int"}, {"<buffer>", "buffer name"}}},
+	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 }
@@ -279,6 +297,36 @@ func bootScreen() {
 	}
 }
 
+func playGame() {
+	target := rand.Intn(10) + 1
+	tries := 0
+	for {
+		tries++
+		cprint(fmt.Sprintf("Arr! guess the number 1-10 (try %d): ", tries))
+		guessStr, _ := readLine()
+		g, err := strconv.Atoi(strings.TrimSpace(guessStr))
+		if err != nil {
+			cprintln("Try a number matey!")
+			continue
+		}
+		if g == target {
+			cprintln("Ye got it!")
+			if highScore == 0 || tries < highScore {
+				highScore = tries
+				cprintln(fmt.Sprintf("New high score: %d", highScore))
+			} else {
+				cprintln(fmt.Sprintf("Score %d - best %d", tries, highScore))
+			}
+			break
+		}
+		if g < target {
+			cprintln("Too low!")
+		} else {
+			cprintln("Too high!")
+		}
+	}
+}
+
 // startRaw puts the terminal into raw mode.
 
 func readPassword() (string, error) {
@@ -339,7 +387,7 @@ func Run() error {
 	// load session before switching to raw mode
 	reader := bufio.NewReader(os.Stdin)
 	history = []string{}
-	buffers = map[string]string{"%file": "", "%code": ""}
+	buffers = map[string]string{"%file": "", "%code": "", "%@": ""}
 	if sessionFile != "" {
 		if b, err := os.ReadFile(sessionFile); err == nil {
 			var s session
@@ -360,7 +408,10 @@ func Run() error {
 			history = s.History
 			buffers = s.Buffers
 			if buffers == nil {
-				buffers = map[string]string{"%file": "", "%code": ""}
+				buffers = map[string]string{"%file": "", "%code": "", "%@": ""}
+			}
+			if _, ok := buffers["%@"]; !ok {
+				buffers["%@"] = ""
 			}
 			if s.Prompt != "" {
 				askPrefix = s.Prompt
@@ -373,6 +424,9 @@ func Run() error {
 			}
 			if s.Model != "" {
 				openai.SetModelName(s.Model)
+			}
+			if s.HighScore != 0 {
+				highScore = s.HighScore
 			}
 		}
 	}
@@ -727,7 +781,7 @@ func saveSession() {
 		pwd, _ := readPassword()
 		sessionPass = pwd
 	}
-	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName()}
+	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore}
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		if sessionPass == "" {
 			os.WriteFile(sessionFile, b, 0644)
@@ -747,6 +801,20 @@ func saveSession() {
 
 func handleCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
+	var capBuf bytes.Buffer
+	capture := true
+	if len(fields) > 0 && fields[0] == "!game" {
+		capture = false
+	}
+	if capture {
+		outputCapture = &capBuf
+	}
+	defer func() {
+		if capture {
+			buffers["%@"] = capBuf.String()
+		}
+		outputCapture = nil
+	}()
 	usage := func(name string) {
 		if info, ok := commands[name]; ok {
 			cmdPrintln("usage: " + info.Usage + " - " + info.Desc)
@@ -930,13 +998,20 @@ func handleCommand(cmd string) bool {
 		if len(fields) < 2 {
 			return false
 		}
-		cprint(buffers[fields[1]])
+		for i := 1; i < len(fields); i++ {
+			if val, ok := buffers[fields[i]]; ok {
+				cprint(val)
+			} else {
+				cmdPrintln("unknown buffer")
+			}
+		}
 	case "!set":
 		if len(fields) < 3 {
 			usage("!set")
 			return false
 		}
-		buffers[fields[1]] = strings.Join(fields[2:], " ")
+		text := replaceBufferRefs(replacePaneRefs(strings.Join(fields[2:], " ")))
+		buffers[fields[1]] = text
 	case "!prefix":
 		if len(fields) < 2 {
 			usage("!prefix")
@@ -956,7 +1031,7 @@ func handleCommand(cmd string) bool {
 	case "!get_prompt":
 		cmdPrintln(askPrefix)
 	case "!session":
-		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName()}
+		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore}
 		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 			buffers["%session"] = string(b)
 		}
@@ -1118,6 +1193,22 @@ func handleCommand(cmd string) bool {
 		respPrintln(reply)
 		respPrintln(respSep)
 		forceEnter()
+	case "!rand":
+		if len(fields) < 4 {
+			usage("!rand")
+			return false
+		}
+		min, err1 := strconv.Atoi(fields[1])
+		max, err2 := strconv.Atoi(fields[2])
+		if err1 != nil || err2 != nil || min > max {
+			cmdPrintln("bad range")
+			return false
+		}
+		n := rand.Intn(max-min+1) + min
+		buffers[fields[3]] = strconv.Itoa(n)
+		cmdPrintln(strconv.Itoa(n))
+	case "!game":
+		playGame()
 	case "!a":
 		if len(fields) < 2 {
 			usage("!a")
