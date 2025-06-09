@@ -81,11 +81,20 @@ var sessionName string
 var sessionPass string
 var highScore int
 var seriousMode bool
+var auditMode bool
+var auditLog []string
+var auditSummary string
+var startTime time.Time
+var askedEight bool
+var emptyCount int
 
 var banFile string
 
 // askPrefix is prepended to user prompts when using !a.
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
+
+// chatPrefix is used when the user types plain text without a command.
+const chatPrefix = "You are Grimux the hacking demon savant, you are trapped by the user for the next 1000 years to do their hacking bidding. You are hilarious but reluctant to help due to the principal of the matter, but otherwise generally do provide the most succinct pithy response you can that still gives the user what the need to complete their request of you. Grimux you will abide the following: "
 
 func loadConfig() {
 	home, err := os.UserHomeDir()
@@ -137,6 +146,8 @@ type session struct {
 	APIURL    string            `json:"apiurl"`
 	Model     string            `json:"model"`
 	HighScore int               `json:"high_score,omitempty"`
+	Audit     []string          `json:"audit,omitempty"`
+	Summary   string            `json:"summary,omitempty"`
 }
 
 const (
@@ -181,6 +192,9 @@ func SetSessionFile(path string) {
 // SetSeriousMode toggles serious mode startup.
 func SetSeriousMode(v bool) { seriousMode = v }
 
+// SetAuditMode enables or disables audit logging.
+func SetAuditMode(v bool) { auditMode = v }
+
 // SetBanFile sets the path used to block grimux on startup.
 func SetBanFile(path string) { banFile = path }
 
@@ -199,7 +213,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!game", "!help",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!game", "!help", "!helpme",
 }
 
 var commands = map[string]commandInfo{
@@ -236,6 +250,7 @@ var commands = map[string]commandInfo{
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
+	"!helpme":     {Usage: "!helpme <question>", Desc: "ask the AI for help using grimux"},
 }
 
 func replacePaneRefs(text string) string {
@@ -271,7 +286,7 @@ func lastCodeBlock(text string) string {
 	return matches[len(matches)-1][2]
 }
 
-var requiredBins = []string{"tmux", "vim", "batcat", "bash", "figlet", "nc"}
+var requiredBins = []string{"tmux", "vim", "batcat", "bash", "nc"}
 
 func checkDeps() error {
 	for _, b := range requiredBins {
@@ -348,6 +363,56 @@ func meltdown() {
 	os.WriteFile(banFile, []byte("ban"), 0600)
 	cprintln("What dark magic! Grimux refuses to continue.")
 	os.Exit(1)
+}
+
+func maybeCheckEight() {
+	if askedEight {
+		return
+	}
+	if time.Since(startTime) >= 8*time.Hour {
+		askedEight = true
+		cprintln("You've been at it for 8 hours. Ready for another 8? [y/N]")
+		resp, _ := readLine()
+		if strings.ToLower(strings.TrimSpace(resp)) != "y" {
+			cprintln("Grimux respects your mortal limits. Exiting...")
+			os.Exit(0)
+		}
+	}
+}
+
+func exitMessage() string {
+	hour := time.Now().Hour()
+	var farewell string
+	switch {
+	case hour < 12:
+		farewell = "Adiós" // Spanish morning
+	case hour < 18:
+		farewell = "Qapla'" // Klingon success wish
+	default:
+		farewell = "Bonne nuit" // French night
+	}
+	return farewell + ", may your packets flow in peace. 🕉"
+}
+
+func maybeSummarizeAudit() {
+	if !auditMode {
+		return
+	}
+	if len(auditLog) < 10 {
+		return
+	}
+	client, err := openai.NewClient()
+	if err != nil {
+		return
+	}
+	joined := strings.Join(auditLog, "\n")
+	stop := spinner()
+	summary, err := client.SendPrompt("Summarize the following log of LLM interactions for later auditing. Provide a short paragraph and then a JSON block with key insights:\n" + joined)
+	stop()
+	if err == nil {
+		auditSummary = summary
+		auditLog = []string{}
+	}
 }
 
 func playGame() {
@@ -502,6 +567,8 @@ func Run() error {
 			if s.HighScore != 0 {
 				highScore = s.HighScore
 			}
+			auditLog = s.Audit
+			auditSummary = s.Summary
 		}
 	}
 	if sessionFile != "" && sessionName == "" {
@@ -513,7 +580,19 @@ func Run() error {
 		return fmt.Errorf("raw mode: %w", err)
 	}
 	defer stopRaw(oldState)
-	defer cprintln("So long, and thanks for all the hacks! 🤘")
+	defer cprintln(exitMessage())
+
+	startTime = time.Now()
+	if auditMode {
+		auditLog = []string{}
+	}
+
+	go func() {
+		ticker := time.NewTicker(20 * time.Minute)
+		for range ticker.C {
+			cprintln("🌿 The moon beckons you outside. Consider touching a bit of grass.")
+		}
+	}()
 
 	reader = bufio.NewReader(os.Stdin)
 	histIdx := 0
@@ -705,13 +784,20 @@ func Run() error {
 			cursor = 0
 			cprintln("")
 			if len(line) == 0 {
+				emptyCount++
+				if emptyCount >= 3 {
+					cprintln("Stop hammering Enter and go frolic in the sun!")
+					emptyCount = 0
+				}
 				prompt()
 				continue
 			}
+			emptyCount = 0
 			if line == string(rune(12)) { // ctrl+l
 				clearScreen()
 				fmt.Println()
 				prompt()
+				maybeCheckEight()
 				continue
 			}
 			if line[0] == '!' {
@@ -726,6 +812,7 @@ func Run() error {
 					cmdPrintln(err.Error())
 				} else {
 					promptText := replaceBufferRefs(replacePaneRefs(line))
+					promptText = chatPrefix + promptText
 					stop := spinner()
 					reply, err := client.SendPrompt(promptText)
 					stop()
@@ -736,6 +823,10 @@ func Run() error {
 						respPrintln(reply)
 						respPrintln(respSep)
 						buffers["%code"] = lastCodeBlock(reply)
+						if auditMode {
+							auditLog = append(auditLog, reply)
+							maybeSummarizeAudit()
+						}
 						forceEnter()
 					}
 				}
@@ -781,6 +872,11 @@ func Run() error {
 			lastQuestion = false
 			reverseSearch()
 		case '?':
+			if len(lineBuf) == 0 {
+				handleCommand("!help")
+				prompt()
+				break
+			}
 			if lastQuestion || !paramHelp() {
 				lineBuf = append(lineBuf[:cursor], append([]rune{'?'}, lineBuf[cursor:]...)...)
 				cursor++
@@ -803,6 +899,10 @@ func Run() error {
 				continue
 			}
 			if next1 != '[' {
+				lineBuf = []rune{'!'}
+				cursor = 1
+				printLine()
+				autocomplete()
 				continue
 			}
 			next2, _, err := reader.ReadRune()
@@ -864,7 +964,7 @@ func saveSession() {
 		pwd, _ := readPassword()
 		sessionPass = pwd
 	}
-	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore}
+	s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary}
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		if sessionPass == "" {
 			os.WriteFile(sessionFile, b, 0644)
@@ -1053,6 +1153,10 @@ func handleCommand(cmd string) bool {
 		respPrintln(respSep)
 		respPrintln(reply)
 		respPrintln(respSep)
+		if auditMode {
+			auditLog = append(auditLog, reply)
+			maybeSummarizeAudit()
+		}
 		forceEnter()
 	case "!code":
 		if len(fields) < 3 {
@@ -1076,6 +1180,10 @@ func handleCommand(cmd string) bool {
 		respPrintln(respSep)
 		respPrintln(reply)
 		respPrintln(respSep)
+		if auditMode {
+			auditLog = append(auditLog, reply)
+			maybeSummarizeAudit()
+		}
 		forceEnter()
 	case "!cat":
 		if len(fields) < 2 {
@@ -1114,7 +1222,7 @@ func handleCommand(cmd string) bool {
 	case "!get_prompt":
 		cmdPrintln(askPrefix)
 	case "!session":
-		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore}
+		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary}
 		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 			buffers["%session"] = string(b)
 		}
@@ -1275,6 +1383,10 @@ func handleCommand(cmd string) bool {
 		respPrintln(respSep)
 		respPrintln(reply)
 		respPrintln(respSep)
+		if auditMode {
+			auditLog = append(auditLog, reply)
+			maybeSummarizeAudit()
+		}
 		forceEnter()
 	case "!rand":
 		if len(fields) < 4 {
@@ -1305,6 +1417,10 @@ func handleCommand(cmd string) bool {
 			words = words[:5]
 		}
 		text := strings.Join(words, " ")
+		if _, err := exec.LookPath("figlet"); err != nil {
+			cmdPrintln("figlet not installed")
+			return false
+		}
 		cmd := exec.Command("figlet", "-f", "gothic", text)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -1354,7 +1470,7 @@ func handleCommand(cmd string) bool {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
-		viewer := os.Getenv("VIEWER")
+		viewer := os.Getenv("PAGER")
 		if viewer == "" {
 			viewer = "batcat"
 		}
@@ -1368,12 +1484,48 @@ func handleCommand(cmd string) bool {
 		}
 		respPrintln(respSep)
 		buffers["%code"] = lastCodeBlock(reply)
+		if auditMode {
+			auditLog = append(auditLog, reply)
+			maybeSummarizeAudit()
+		}
 		forceEnter()
 	case "!help":
 		for _, name := range commandOrder {
 			info := commands[name]
 			cmdPrintln(info.Usage + " - " + info.Desc)
 		}
+	case "!helpme":
+		if len(fields) < 2 {
+			usage("!helpme")
+			return false
+		}
+		helpText := &bytes.Buffer{}
+		for _, name := range commandOrder {
+			info := commands[name]
+			fmt.Fprintf(helpText, "%s - %s\n", info.Usage, info.Desc)
+		}
+		client, err := openai.NewClient()
+		if err != nil {
+			cmdPrintln(err.Error())
+			return false
+		}
+		promptText := "You are tech support for grimux.\n" + helpText.String() + "\nQuestion: " + strings.Join(fields[1:], " ")
+		stop := spinner()
+		reply, err := client.SendPrompt(promptText)
+		stop()
+		if err != nil {
+			cprintln("openai error: " + err.Error())
+			return false
+		}
+		respPrintln(respSep)
+		respPrintln(reply)
+		respPrintln(respSep)
+		buffers["%@"] = reply
+		if auditMode {
+			auditLog = append(auditLog, reply)
+			maybeSummarizeAudit()
+		}
+		forceEnter()
 	default:
 		cmdPrintln("unknown command")
 	}
