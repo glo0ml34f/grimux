@@ -1,0 +1,1 @@
+Socraduck interrogates every assumption with the Socratic method. This quirky companion of Grimux helps users solve problems by asking probing questions in tidy markdown.

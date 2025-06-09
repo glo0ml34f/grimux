@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/example/grimux/internal/openai"
 	"github.com/example/grimux/internal/tmux"
@@ -26,6 +27,29 @@ const asciiArt = "\033[1;36m" + `
  ||__|||__|||__|||__|||_______|||__|||__|||__|||__||
  |/__\|/__\|/__\|/__\|/_______\|/__\|/__\|/__\|/__\|
 ` + "\033[0m"
+
+var greetings = map[string][3]string{
+	"Spanish":  {"Buenos días", "Buenas tardes", "Buenas noches"},
+	"French":   {"Bonjour", "Bon après-midi", "Bonsoir"},
+	"German":   {"Guten Morgen", "Guten Tag", "Guten Abend"},
+	"Japanese": {"おはようございます", "こんにちは", "こんばんは"},
+}
+
+func greeting() string {
+	langNames := make([]string, 0, len(greetings))
+	for k := range greetings {
+		langNames = append(langNames, k)
+	}
+	lang := langNames[rand.Intn(len(langNames))]
+	idx := 0
+	hour := time.Now().Hour()
+	if hour >= 12 && hour < 18 {
+		idx = 1
+	} else if hour >= 18 {
+		idx = 2
+	}
+	return fmt.Sprintf("%s (%s)", greetings[lang][idx], lang)
+}
 
 var prompts = []string{
 	"In a haze of eternal night, grumble about being woken for more human nonsense",
@@ -41,7 +65,8 @@ type config struct {
 
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
-var bufferPattern = regexp.MustCompile(`%[a-zA-Z0-9_]+`)
+// bufferPattern matches buffer references like %foo or %@
+var bufferPattern = regexp.MustCompile(`%[@a-zA-Z0-9_]+`)
 var codeBlockPattern = regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]+)\n(.*?)\n```")
 var buffers = map[string]string{
 	"%file": "",
@@ -55,6 +80,9 @@ var sessionFile string
 var sessionName string
 var sessionPass string
 var highScore int
+var seriousMode bool
+
+var banFile string
 
 // askPrefix is prepended to user prompts when using !a.
 var askPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
@@ -150,6 +178,12 @@ func SetSessionFile(path string) {
 	}
 }
 
+// SetSeriousMode toggles serious mode startup.
+func SetSeriousMode(v bool) { seriousMode = v }
+
+// SetBanFile sets the path used to block grimux on startup.
+func SetBanFile(path string) { banFile = path }
+
 type paramInfo struct {
 	Name string
 	Desc string
@@ -165,7 +199,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!game", "!help",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!game", "!help",
 }
 
 var commands = map[string]commandInfo{
@@ -197,6 +231,8 @@ var commands = map[string]commandInfo{
 	"!env":        {Usage: "!env", Desc: "list environment variables"},
 	"!sum":        {Usage: "!sum <buffer>", Desc: "summarize buffer with LLM", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rand":       {Usage: "!rand <min> <max> <buffer>", Desc: "store random number", Params: []paramInfo{{"<min>", "min int"}, {"<max>", "max int"}, {"<buffer>", "buffer name"}}},
+	"!ascii":      {Usage: "!ascii <buffer>", Desc: "gothic ascii art of first 5 words", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!nc":         {Usage: "!nc <buffer> <args>", Desc: "pipe buffer to netcat", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<args>", "nc arguments"}}},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
@@ -235,7 +271,7 @@ func lastCodeBlock(text string) string {
 	return matches[len(matches)-1][2]
 }
 
-var requiredBins = []string{"tmux", "vim", "batcat", "bash"}
+var requiredBins = []string{"tmux", "vim", "batcat", "bash", "figlet", "nc"}
 
 func checkDeps() error {
 	for _, b := range requiredBins {
@@ -297,33 +333,62 @@ func bootScreen() {
 	}
 }
 
+func meltdown() {
+	for k := range buffers {
+		delete(buffers, k)
+	}
+	history = nil
+	if sessionFile != "" {
+		os.Remove(sessionFile)
+	}
+	home, _ := os.UserHomeDir()
+	if banFile == "" {
+		banFile = filepath.Join(home, ".grimux_banned")
+	}
+	os.WriteFile(banFile, []byte("ban"), 0600)
+	cprintln("What dark magic! Grimux refuses to continue.")
+	os.Exit(1)
+}
+
 func playGame() {
-	target := rand.Intn(10) + 1
-	tries := 0
-	for {
-		tries++
-		cprint(fmt.Sprintf("Arr! guess the number 1-10 (try %d): ", tries))
-		guessStr, _ := readLine()
-		g, err := strconv.Atoi(strings.TrimSpace(guessStr))
-		if err != nil {
-			cprintln("Try a number matey!")
-			continue
-		}
-		if g == target {
-			cprintln("Ye got it!")
-			if highScore == 0 || tries < highScore {
-				highScore = tries
-				cprintln(fmt.Sprintf("New high score: %d", highScore))
-			} else {
-				cprintln(fmt.Sprintf("Score %d - best %d", tries, highScore))
+	for i := 5; i > 0; i-- {
+		cprintln(fmt.Sprintf("%d...", i))
+		time.Sleep(time.Second)
+	}
+	wait := rand.Intn(10) + 1
+	time.Sleep(time.Duration(wait) * time.Second)
+	cprintln("NOW! Press space!")
+	start := time.Now()
+	reader := bufio.NewReader(os.Stdin)
+	done := make(chan struct{})
+	go func() {
+		for {
+			r, _, err := reader.ReadRune()
+			if err != nil {
+				continue
 			}
-			break
+			if r == ' ' {
+				close(done)
+				return
+			}
 		}
-		if g < target {
-			cprintln("Too low!")
+	}()
+	select {
+	case <-done:
+		delta := time.Since(start).Microseconds()
+		if delta == 0 {
+			meltdown()
+			return
+		}
+		score := int(1000000 / (delta + 1))
+		if score > highScore {
+			highScore = score
+			cprintln(fmt.Sprintf("New high score: %d", highScore))
 		} else {
-			cprintln("Too high!")
+			cprintln(fmt.Sprintf("Score %d - best %d", score, highScore))
 		}
+	case <-time.After(3 * time.Second):
+		cprintln("Too slow! Score 0")
 	}
 }
 
@@ -380,8 +445,17 @@ func readLine() (string, error) {
 
 // Run launches the interactive REPL.
 func Run() error {
-	if err := checkDeps(); err != nil {
-		return err
+	home, _ := os.UserHomeDir()
+	if banFile == "" {
+		banFile = filepath.Join(home, ".grimux_banned")
+	}
+	if _, err := os.Stat(banFile); err == nil {
+		return fmt.Errorf("grimux refuses to run: ban file present")
+	}
+	if !seriousMode {
+		if err := checkDeps(); err != nil {
+			return err
+		}
 	}
 	loadConfig()
 	// load session before switching to raw mode
@@ -447,26 +521,35 @@ func Run() error {
 	cursor := 0
 	lastQuestion := false
 
-	cprintln(asciiArt + "\nWelcome to grimux! 💀")
-	cprintln("Press Tab for auto-completion. Type !help for more info.")
+	if !seriousMode {
+		cprintln(asciiArt + "\nWelcome to grimux! 💀")
+		cprintln(greeting())
+		cprintln("Press Tab for auto-completion. Type !help for more info.")
+	}
 
 	rand.Seed(time.Now().UnixNano())
 	if client, err := openai.NewClient(); err != nil {
-		cprintln("⚠️  " + err.Error())
+		if !seriousMode {
+			cprintln("⚠️  " + err.Error())
+		}
 	} else {
-		p := prompts[rand.Intn(len(prompts))]
-		stop := spinner()
-		reply, err := client.SendPrompt(p + "and please keep your response short, pithy, and funny")
-		stop()
-		if err == nil {
-			cprintln("Checking OpenAI integration... " + ok())
-			respPrintln(respSep)
-			respPrintln(reply)
-			forceEnter()
-			respPrintln(respSep)
-			bootScreen()
+		if seriousMode {
+			client.SendPrompt("ping")
 		} else {
-			cprintln("openai error: " + err.Error())
+			p := prompts[rand.Intn(len(prompts))]
+			stop := spinner()
+			reply, err := client.SendPrompt(p + "and please keep your response short, pithy, and funny")
+			stop()
+			if err == nil {
+				cprintln("Checking OpenAI integration... " + ok())
+				respPrintln(respSep)
+				respPrintln(reply)
+				forceEnter()
+				respPrintln(respSep)
+				bootScreen()
+			} else {
+				cprintln("openai error: " + err.Error())
+			}
 		}
 	}
 
@@ -1207,6 +1290,49 @@ func handleCommand(cmd string) bool {
 		n := rand.Intn(max-min+1) + min
 		buffers[fields[3]] = strconv.Itoa(n)
 		cmdPrintln(strconv.Itoa(n))
+	case "!ascii":
+		if len(fields) < 2 {
+			usage("!ascii")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		words := strings.FieldsFunc(data, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+		if len(words) > 5 {
+			words = words[:5]
+		}
+		text := strings.Join(words, " ")
+		cmd := exec.Command("figlet", "-f", "gothic", text)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			cmdPrintln("figlet error: " + err.Error())
+			return false
+		}
+		result := string(out)
+		buffers["%@"] = result
+		cmdPrintln(result)
+	case "!nc":
+		if len(fields) < 3 {
+			usage("!nc")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		args := fields[2:]
+		cmd := exec.Command("nc", args...)
+		cmd.Stdin = strings.NewReader(data)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			cmdPrintln("nc error: " + err.Error())
+		}
+		buffers["%@"] = string(out)
+		cmdPrintln(string(out))
 	case "!game":
 		playGame()
 	case "!a":
