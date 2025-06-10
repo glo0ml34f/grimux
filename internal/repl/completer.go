@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/example/grimux/internal/tmux"
+	"github.com/glo0ml34f/grimux/internal/tmux"
 )
 
 type autoCompleter struct{}

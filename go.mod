@@ -1,4 +1,4 @@
-module github.com/example/grimux
+module github.com/glo0ml34f/grimux
 
 go 1.24.3
 

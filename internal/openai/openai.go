@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/example/grimux/internal/input"
+	"github.com/glo0ml34f/grimux/internal/input"
 )
 
 const defaultAPIURL = "https://api.openai.com/v1/chat/completions"
@@ -52,8 +52,7 @@ func NewClient() (*Client, error) {
 		key = sessionAPIKey
 	}
 	if key == "" {
-		fmt.Fprint(os.Stdout, "OpenAI API key: ")
-		line, err := input.ReadPassword()
+		line, err := input.ReadPasswordPrompt("OpenAI API key: ")
 		if err != nil {
 			return nil, err
 		}
@@ -69,8 +68,7 @@ func NewClient() (*Client, error) {
 		url = sessionAPIURL
 	}
 	if url == "" {
-		fmt.Fprintf(os.Stdout, "OpenAI API URL [%s]: ", defaultAPIURL)
-		line, err := input.ReadLine()
+		line, err := input.ReadLinePrompt(fmt.Sprintf("OpenAI API URL [%s]: ", defaultAPIURL))
 		if err != nil {
 			return nil, err
 		}

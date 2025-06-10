@@ -6,9 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/example/grimux/internal/repl"
+	"github.com/glo0ml34f/grimux/internal/repl"
 )
 
+// version is set at build time using -ldflags. Default is "dev".
 var version = "dev"
 
 func main() {
@@ -23,6 +24,7 @@ func main() {
 	}
 	repl.SetSeriousMode(*serious)
 	repl.SetAuditMode(*audit)
+	repl.SetVersion(version)
 	home, _ := os.UserHomeDir()
 	repl.SetBanFile(filepath.Join(home, ".grimux_banned"))
 	if flag.NArg() > 0 {
