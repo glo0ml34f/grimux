@@ -1,74 +1,112 @@
 # grimux 😈
 
-Grimux is a whimsical tmux REPL designed for hackers who love composable text workflows. It lives inside your tmux session, capturing pane output, letting you pipe text through `$EDITOR`, rendering markdown through `batcat` (or `$VIEWER`), and generally making mischief a breeze.
+Grimux is a tmux REPL built for composable hacking rituals. Commands read from and write to named buffers so you can capture text from panes, transform it and feed it back into the next step. Nothing is stored unless you save a session, keeping the workflow quick and ephemeral.
 
-## Why Buffers and Panes?
-Buffers are named scratch spaces like `%file`, `%code`, `%@` and whatever else you invent. Commands read from and write to these buffers so you can chain actions together. Panes are referenced by their tmux id (for example `%1`). Capture pane output with `!observe` and it lands in a buffer ready for editing, AI prompts or shell commands.
-Pane ids themselves behave like buffers – read from `%1` to capture that pane or write to it to send keystrokes.
+## Goals
+- Minimal friction text manipulation
+- Buffers as the glue between panes, files, shell commands and the AI
+- A touch of whimsy to keep hackers in flow
 
-## Core Workflow
-1. Use `!ls` to view panes and buffers.
-2. Capture a pane with `!observe %buf %1`.
-3. Edit that buffer with `!edit %buf` or run commands with `!run %buf cat`.
-4. Pipe buffer text to the AI with `!gen` or `!code`.
-5. Results land in `%@` so you can feed them right back into the next command.
+## Quick start
+```bash
+# build the binary
+go build ./cmd/grimux
+# run inside tmux (optionally pass a session file)
+./grimux [session.grimux]
+```
+Press `?` for inline help or `!help` once the prompt appears.
 
-The goal is low friction hacking. You work entirely in text buffers and every command plays nicely with the others.
+## Buffers and panes
+Buffers are scratch spaces like `%file`, `%code` and `%@`. They hold text for
+commands to consume or produce. Panes are addressed by their tmux id (e.g. `%1`).
+`!observe %buf %1` captures pane output into `%buf`; sending text to a pane works
+the same way using its id as a buffer name.
 
-## Command Reference
+## Core workflow
+1. `!ls` shows available panes and buffers
+2. `!observe %buf %1` grabs output from a pane
+3. Edit or run commands on that buffer with `!edit %buf` or `!run %buf <cmd>`
+4. Send the text to the AI with `!gen %buf <prompt>` or `!code %buf <prompt>`
+5. Results land in `%@` for chaining into the next action
+
+## Command reference
+- `!quit` – save session and quit
+- `!x` – exit immediately
 - `!ls` – list panes and buffers
-- `!observe <buffer> <pane>` – capture pane into buffer
-- `!cat <buf>` – print a buffer
-- `!set <buffer> <text>` – store text in buffer
-- `!run [buffer] <cmd>` – run shell command and store output
-- `!gen <buffer> <prompt>` – ask the AI and store reply
-- `!code <buffer> <prompt>` – AI prompt but keep last code block
-- `!rand <min> <max> <buffer>` – store random number
-- `!game` – goofy number guessing game
-- `!edit <buffer>` – open buffer in `$EDITOR`
+- `!observe <buffer> <pane-id>` – capture a pane into a buffer
 - `!save <buffer> <file>` – save buffer to file
-- `!file <path> [buf]` – load file into optional buffer
-- `!session` – stash current session JSON in `%session`
-- `!reset` – wipe the current session and restore defaults
-- `!grep <regex> [bufs]` – search buffers for regex
-- `!model <name>` – set the OpenAI model
-- `!sum <buffer>` – summarize buffer with the AI
-- `!ascii <buffer>` – convert first five words to gothic ascii art
-- `!nc <buffer> <args>` – pipe buffer through netcat
-- `!curl <url> [buf]` – HTTP GET storing the body
-- `!view <buffer>` – open buffer in `$VIEWER`
-- `!eat <buffer> <pane>` – capture entire scrollback
-- `!rm <buffer>` – delete a buffer
-- `!a <prompt>` – ask the AI with the configured prefix
+- `!load <path>` – load file into `%file`
+- `!file <path> [buffer]` – load file into buffer
+- `!edit <buffer>` – edit buffer in `$EDITOR`
+- `!run [buffer] <command>` – run shell command
+- `!gen <buffer> <prompt>` – AI prompt into buffer
+- `!code <buffer> <prompt>` – AI prompt, store code
+- `!cat <buffer>` – print buffer contents
+- `!set <buffer> <text>` – store text in buffer
+- `!prefix <buffer|file>` – set prefix from buffer or file
+- `!reset` – reset session and prefix
+- `!unset <buffer>` – clear buffer
+- `!get_prompt` – show current prefix
+- `!session` – store session JSON in `%session`
+- `!run_on <buffer> <pane> <cmd>` – run command using pane capture
+- `!flow <buf1> [buf2 ... buf10]` – chain prompts using buffers
+- `!grep <regex> [buffers...]` – search buffers for regex
+- `!model <name>` – set OpenAI model
+- `!pwd` – print working directory
+- `!cd <dir>` – change working directory
+- `!setenv <var> <buffer>` – set env variable from buffer
+- `!getenv <var> <buffer>` – store env variable in buffer
+- `!env` – list environment variables
+- `!sum <buffer>` – summarize buffer with LLM
+- `!rand <min> <max> <buffer>` – store random number
+- `!ascii <buffer>` – gothic ascii art of first 5 words
+- `!nc <buffer> <args>` – pipe buffer to netcat
+- `!curl <url> [buffer]` – HTTP GET and store body
+- `!eat <buffer> <pane>` – capture full scrollback
+- `!view <buffer>` – show buffer in `$VIEWER`
+- `!rm <buffer>` – remove a buffer
+- `!game` – play a tiny game
+- `!version` – show grimux version
+- `!a <prompt>` – ask the AI with prefix
 - `!help` – show this help
-- `!helpme <question>` – send `!help` output and your question to the AI for terse support
+- `!helpme <question>` – ask the AI for help using grimux
 
-Every command (except `!game`) stores its output in `%@` so you can immediately reuse it. Use `%` references anywhere to insert buffer contents or `{%1}` to embed pane captures.
+Every command except `!game` writes its output to `%@`. Use `%name` references in
+any command to insert buffer contents or `{%1}` to embed a pane capture.
 
 ## Hotkeys
 - **Tab** – auto-complete commands and buffer names
 - **Ctrl+L** – clear the screen
-- **Ctrl+R** – reverse search command history
-- **Escape** – clears the current line and starts a command with `!`
+- **Ctrl+R** – reverse search history
+- **Escape** – clear the line and start a command with `!`
 - **Ctrl+G** – instantly start a command with `!`
-- **?** – show inline parameter help or run `!help` when pressed on an empty line
-
-If you mash Enter without typing a command several times, Grimux will cheekily suggest you go touch some grass.
+- **?** – inline parameter help or `!help` when pressed on an empty line
 
 ## Environment
-- `$EDITOR` – editor used by `!edit` (defaults to `vim`)
-- `$VIEWER` – viewer used for markdown output (falls back to `batcat`)
+- `OPENAI_API_KEY` – API key used by AI commands
+- `OPENAI_API_URL` – override the OpenAI endpoint
+- `$EDITOR` – editor for `!edit` (defaults to `vim`)
+- `$VIEWER` – viewer for `!view` (defaults to `batcat`)
 
-## Audit Mode
-Start grimux with `-audit` to keep a log of AI replies. Once the log grows, grimux summarizes it and stores it in the session.
-## Secret Agents
-The `prompts/` directory contains short character blurbs that shape how Grimux's AI helpers speak. They act as your sneaky crew—crypto mages, red team pirates and more. Pick one as a prefix with `!prefix <file>` or `!prefix %buf` to change the vibe of `!a`, `!gen` and friends.
+## CLI flags
+- `-audit` – enable audit logging
+- `-serious` – start in serious mode
+- `-version` – print version and exit
+- `[session file]` – path to load/save session
 
-## Building and Testing
+## Architecture
+The REPL lives in `internal/repl` with supporting packages under `internal/` for
+OpenAI, tmux and input handling. All state is kept in memory as buffers. The
+entry point is `cmd/grimux/main.go`. Session files are optional and only saved
+when you choose to.
+
+## Building and testing
 ```bash
 go build ./cmd/grimux
 go test ./...
 ```
 
-Grimux keeps high scores from `!game` in your session and strives for minimal friction. Have fun, get stuff done and let the agents whisper their arcane knowledge!
+Grimux strives for minimal friction and composable workflows. Enjoy the ritual
+and let your agents whisper arcane knowledge.
+
 ![grimux](docs/screenshot.png)
