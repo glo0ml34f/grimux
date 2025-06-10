@@ -1,13 +1,14 @@
 package openai
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/example/grimux/internal/input"
 )
 
 const defaultAPIURL = "https://api.openai.com/v1/chat/completions"
@@ -50,11 +51,9 @@ func NewClient() (*Client, error) {
 	if key == "" {
 		key = sessionAPIKey
 	}
-	reader := bufio.NewReader(os.Stdin)
 	if key == "" {
 		fmt.Print("OpenAI API key: ")
-		line, err := reader.ReadString('\n')
-		fmt.Println()
+		line, err := input.ReadPassword()
 		if err != nil {
 			return nil, err
 		}
@@ -71,8 +70,7 @@ func NewClient() (*Client, error) {
 	}
 	if url == "" {
 		fmt.Printf("OpenAI API URL [%s]: ", defaultAPIURL)
-		line, err := reader.ReadString('\n')
-		fmt.Println()
+		line, err := input.ReadLine()
 		if err != nil {
 			return nil, err
 		}

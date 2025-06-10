@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/example/grimux/internal/input"
 	"github.com/example/grimux/internal/openai"
 	"github.com/example/grimux/internal/tmux"
 )
@@ -163,6 +167,8 @@ const (
 func colorize(color, s string) string { return color + s + "\033[0m" }
 
 var outputCapture *bytes.Buffer
+var viewerRunning bool // true when $VIEWER is active
+var pendingGrass bool  // track delayed grass messages
 
 func captureOut(text string, newline bool) {
 	if outputCapture != nil {
@@ -215,7 +221,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!game", "!help", "!helpme",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!eat", "!view", "!rm", "!game", "!help", "!helpme",
 }
 
 var commands = map[string]commandInfo{
@@ -250,6 +256,10 @@ var commands = map[string]commandInfo{
 	"!rand":       {Usage: "!rand <min> <max> <buffer>", Desc: "store random number", Params: []paramInfo{{"<min>", "min int"}, {"<max>", "max int"}, {"<buffer>", "buffer name"}}},
 	"!ascii":      {Usage: "!ascii <buffer>", Desc: "gothic ascii art of first 5 words", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!nc":         {Usage: "!nc <buffer> <args>", Desc: "pipe buffer to netcat", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<args>", "nc arguments"}}},
+	"!curl":       {Usage: "!curl <url> [buffer]", Desc: "HTTP GET and store body", Params: []paramInfo{{"<url>", "target URL"}, {"[buffer]", "optional buffer"}}},
+	"!eat":        {Usage: "!eat <buffer> <pane>", Desc: "capture full scrollback", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane id"}}},
+	"!view":       {Usage: "!view <buffer>", Desc: "show buffer in $VIEWER", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!rm":         {Usage: "!rm <buffer>", Desc: "remove a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
@@ -277,6 +287,14 @@ func replaceBufferRefs(text string) string {
 		if val, ok := buffers[tok]; ok {
 			return val
 		}
+		if strings.HasPrefix(tok, "%") && len(tok) > 1 {
+			if _, err := strconv.Atoi(tok[1:]); err == nil {
+				out, err := capturePane(tok)
+				if err == nil {
+					return out
+				}
+			}
+		}
 		return tok
 	})
 }
@@ -287,6 +305,91 @@ func lastCodeBlock(text string) string {
 		return ""
 	}
 	return matches[len(matches)-1][2]
+}
+
+// isPaneID reports whether the buffer name refers to a tmux pane.
+func isPaneID(name string) bool {
+	if strings.HasPrefix(name, "%") {
+		_, err := strconv.Atoi(name[1:])
+		return err == nil
+	}
+	return false
+}
+
+// readBuffer returns the contents of a buffer or pane capture.
+func readBuffer(name string) (string, bool) {
+	if val, ok := buffers[name]; ok {
+		return val, true
+	}
+	if isPaneID(name) {
+		out, err := capturePane(name)
+		if err == nil {
+			return out, true
+		}
+	}
+	return "", false
+}
+
+// writeBuffer stores data in a buffer or sends it to a pane if the name refers to one.
+func writeBuffer(name, data string) {
+	if isPaneID(name) {
+		tmux.SendKeys(name, data)
+		return
+	}
+	buffers[name] = data
+}
+
+// validateBufferName checks naming rules for creating buffers.
+func validateBufferName(name string) error {
+	if !strings.HasPrefix(name, "%") {
+		return fmt.Errorf("buffer must start with %%")
+	}
+	if isPaneID(name) {
+		return fmt.Errorf("cannot use pane id as buffer")
+	}
+	if _, exists := buffers[name]; exists {
+		return fmt.Errorf("buffer exists")
+	}
+	if len(name) > 1 {
+		allDigits := true
+		for _, r := range name[1:] {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return fmt.Errorf("buffer cannot be digits only")
+		}
+	}
+	return nil
+}
+
+// readPath reads from a regular file or unix socket.
+func readPath(path string) ([]byte, error) {
+	if fi, err := os.Stat(path); err == nil && fi.Mode()&os.ModeSocket != 0 {
+		conn, err := net.Dial("unix", path)
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+		return io.ReadAll(conn)
+	}
+	return os.ReadFile(path)
+}
+
+// writePath writes data to a file or unix socket.
+func writePath(path string, data []byte) error {
+	if fi, err := os.Stat(path); err == nil && fi.Mode()&os.ModeSocket != 0 {
+		conn, err := net.Dial("unix", path)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		_, err = conn.Write(data)
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 var requiredBins = []string{"tmux", "vim", "batcat", "bash", "nc"}
@@ -315,7 +418,7 @@ func spinner() func() {
 		for {
 			select {
 			case <-done:
-				fmt.Print("\r\033[K")
+				fmt.Print("\r\033[J")
 				close(finished)
 				return
 			default:
@@ -397,6 +500,21 @@ func exitMessage() string {
 	return farewell + ", may your packets flow in peace. 🕉"
 }
 
+// grassMessage returns a seasonal reminder to step away from the screen.
+func grassMessage() string {
+	m := time.Now().Month()
+	switch m {
+	case time.December, time.January, time.February:
+		return "❄️  It's cold out, maybe touch some snow instead of grass."
+	case time.March, time.April, time.May:
+		return "🌱 Spring vibes! Go sniff some fresh grass."
+	case time.June, time.July, time.August:
+		return "🌞 Summer's calling. Touch the warm grass outside."
+	default:
+		return "🍂 Autumn leaves await. Kick through some grass."
+	}
+}
+
 func maybeSummarizeAudit() {
 	if !auditMode {
 		return
@@ -462,54 +580,13 @@ func playGame() {
 
 // startRaw puts the terminal into raw mode.
 
-func readPassword() (string, error) {
-	old, err := startRaw()
-	if err != nil {
-		return "", err
-	}
-	defer stopRaw(old)
-	reader := bufio.NewReader(os.Stdin)
-	var buf bytes.Buffer
-	for {
-		r, _, err := reader.ReadRune()
-		if err != nil {
-			return "", err
-		}
-		if r == '\n' || r == '\r' {
-			break
-		}
-		buf.WriteRune(r)
-	}
-	fmt.Println()
-	return buf.String(), nil
-}
+// readPassword uses the shared input helper to gather a secret string.
+func readPassword() (string, error) { return input.ReadPassword() }
 
 // readLine reads a line from stdin while echoing user input. It is used while
 // in raw mode so users can see what they type.
-func readLine() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-	var buf []rune
-	for {
-		r, _, err := reader.ReadRune()
-		if err != nil {
-			return "", err
-		}
-		if r == '\n' || r == '\r' {
-			break
-		}
-		if r == 127 || r == '\b' {
-			if len(buf) > 0 {
-				buf = buf[:len(buf)-1]
-				fmt.Print("\b \b")
-			}
-			continue
-		}
-		buf = append(buf, r)
-		fmt.Print(string(r))
-	}
-	fmt.Println()
-	return string(buf), nil
-}
+// readLine gathers input while echoing keystrokes during raw mode.
+func readLine() (string, error) { return input.ReadLine() }
 
 // Run launches the interactive REPL.
 func Run() error {
@@ -593,7 +670,11 @@ func Run() error {
 	go func() {
 		ticker := time.NewTicker(20 * time.Minute)
 		for range ticker.C {
-			cprintln("🌿 The moon beckons you outside. Consider touching a bit of grass.")
+			if viewerRunning {
+				pendingGrass = true
+				continue
+			}
+			cprintln(grassMessage())
 		}
 	}()
 
@@ -607,6 +688,8 @@ func Run() error {
 		cprintln(asciiArt + "\nWelcome to grimux! 💀")
 		cprintln(greeting())
 		cprintln("Press Tab for auto-completion. Type !help for more info.")
+		tips := []string{"Use !ls to see buffers", "Arrow keys edit your input", "!view %viewer shows long output"}
+		cprintln("Tip: " + tips[rand.Intn(len(tips))])
 	}
 
 	rand.Seed(time.Now().UnixNano())
@@ -814,7 +897,7 @@ func Run() error {
 			if len(line) == 0 {
 				emptyCount++
 				if emptyCount >= 3 {
-					cprintln("Stop hammering Enter and go frolic in the sun!")
+					cprintln(grassMessage())
 					emptyCount = 0
 				}
 				prompt()
@@ -986,6 +1069,16 @@ func Run() error {
 					cursor = 0
 					printLine()
 				}
+			case 'C': // Right arrow
+				if cursor < len(lineBuf) {
+					cursor++
+					printLine()
+				}
+			case 'D': // Left arrow
+				if cursor > 0 {
+					cursor--
+					printLine()
+				}
 			}
 		default:
 			lastQuestion = false
@@ -1079,12 +1172,18 @@ func handleCommand(cmd string) bool {
 			usage("!observe")
 			return false
 		}
+		if _, ok := buffers[fields[1]]; !ok {
+			if err := validateBufferName(fields[1]); err != nil {
+				cmdPrintln(err.Error())
+				return false
+			}
+		}
 		out, err := capturePane(fields[2])
 		if err != nil {
 			cmdPrintln("capture error: " + err.Error())
 			return false
 		}
-		buffers[fields[1]] = out
+		writeBuffer(fields[1], out)
 		cprint(out)
 	case "!save":
 		if len(fields) < 3 {
@@ -1096,7 +1195,7 @@ func handleCommand(cmd string) bool {
 			cmdPrintln("unknown buffer")
 			return false
 		}
-		if err := os.WriteFile(fields[2], []byte(data), 0644); err != nil {
+		if err := writePath(fields[2], []byte(data)); err != nil {
 			cmdPrintln("save error: " + err.Error())
 		}
 	case "!load":
@@ -1104,12 +1203,12 @@ func handleCommand(cmd string) bool {
 			usage("!load")
 			return false
 		}
-		b, err := os.ReadFile(fields[1])
+		b, err := readPath(fields[1])
 		if err != nil {
 			cmdPrintln("file error: " + err.Error())
 			return false
 		}
-		buffers["%file"] = string(b)
+		writeBuffer("%file", string(b))
 	case "!file":
 		if len(fields) < 2 {
 			usage("!file")
@@ -1120,12 +1219,18 @@ func handleCommand(cmd string) bool {
 		if len(fields) >= 3 {
 			bufName = fields[2]
 		}
-		b, err := os.ReadFile(path)
+		if _, ok := buffers[bufName]; !ok {
+			if err := validateBufferName(bufName); err != nil {
+				cmdPrintln(err.Error())
+				return false
+			}
+		}
+		b, err := readPath(path)
 		if err != nil {
 			cmdPrintln("file error: " + err.Error())
 			return false
 		}
-		buffers[bufName] = string(b)
+		writeBuffer(bufName, string(b))
 	case "!edit":
 		if len(fields) < 2 {
 			usage("!edit")
@@ -1247,7 +1352,7 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		for i := 1; i < len(fields); i++ {
-			if val, ok := buffers[fields[i]]; ok {
+			if val, ok := readBuffer(fields[i]); ok {
 				cprint(val)
 			} else {
 				cmdPrintln("unknown buffer")
@@ -1258,8 +1363,15 @@ func handleCommand(cmd string) bool {
 			usage("!set")
 			return false
 		}
+		name := fields[1]
+		if _, exists := buffers[name]; !exists {
+			if err := validateBufferName(name); err != nil {
+				cmdPrintln(err.Error())
+				return false
+			}
+		}
 		text := replaceBufferRefs(replacePaneRefs(strings.Join(fields[2:], " ")))
-		buffers[fields[1]] = text
+		writeBuffer(name, text)
 	case "!prefix":
 		if len(fields) < 2 {
 			usage("!prefix")
@@ -1299,7 +1411,12 @@ func handleCommand(cmd string) bool {
 			usage("!unset")
 			return false
 		}
-		buffers[fields[1]] = ""
+		name := fields[1]
+		if isPaneID(name) || name == "%file" || name == "%code" || name == "%viewer" {
+			cmdPrintln("cannot unset system buffer")
+			return false
+		}
+		delete(buffers, name)
 	case "!get_prompt":
 		cmdPrintln(askPrefix)
 	case "!session":
@@ -1530,6 +1647,81 @@ func handleCommand(cmd string) bool {
 		}
 		buffers["%@"] = string(out)
 		cmdPrintln(string(out))
+	case "!curl":
+		if len(fields) < 2 {
+			usage("!curl")
+			return false
+		}
+		url := fields[1]
+		outBuf := "%@"
+		if len(fields) >= 3 {
+			outBuf = fields[2]
+		}
+		resp, err := http.Get(url)
+		if err != nil {
+			cmdPrintln("curl error: " + err.Error())
+			return false
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		if len(b) > 0 {
+			writeBuffer(outBuf, string(b))
+			cmdPrintln(string(b))
+		} else {
+			code := strconv.Itoa(resp.StatusCode)
+			writeBuffer(outBuf, code)
+			cmdPrintln(code)
+		}
+		forceEnter()
+	case "!eat":
+		if len(fields) < 3 {
+			usage("!eat")
+			return false
+		}
+		out, err := tmux.CapturePaneFull(fields[2])
+		if err != nil {
+			cmdPrintln("capture error: " + err.Error())
+			return false
+		}
+		writeBuffer(fields[1], out)
+	case "!view":
+		if len(fields) < 2 {
+			usage("!view")
+			return false
+		}
+		data, ok := readBuffer(fields[1])
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		viewer := os.Getenv("VIEWER")
+		if viewer == "" {
+			viewer = "batcat"
+		}
+		cmd := exec.Command(viewer, "-l", "markdown")
+		cmd.Stdin = strings.NewReader(data)
+		viewerRunning = true
+		if err := cmd.Run(); err != nil {
+			cmdPrintln(viewer + " error: " + err.Error())
+		}
+		viewerRunning = false
+		if pendingGrass {
+			cprintln(grassMessage())
+			pendingGrass = false
+		}
+		writeBuffer("%viewer", data)
+		forceEnter()
+	case "!rm":
+		if len(fields) < 2 {
+			usage("!rm")
+			return false
+		}
+		name := fields[1]
+		if name == "%file" || name == "%code" || name == "%viewer" || name == "%@" || isPaneID(name) {
+			cmdPrintln("cannot delete system buffer")
+			return false
+		}
+		delete(buffers, name)
 	case "!game":
 		playGame()
 	case "!a":
@@ -1558,12 +1750,23 @@ func handleCommand(cmd string) bool {
 		args := []string{"-l", "markdown"}
 		cmd := exec.Command(viewer, args...)
 		cmd.Stdin = strings.NewReader(reply)
-		cmd.Stdout = os.Stdout
+		var out bytes.Buffer
+		cmd.Stdout = io.MultiWriter(os.Stdout, &out)
+		viewerRunning = true
 		respPrintln(respSep)
 		if err := cmd.Run(); err != nil {
 			cmdPrintln(viewer + " error: " + err.Error())
 		}
+		viewerRunning = false
+		if pendingGrass {
+			cprintln(grassMessage())
+			pendingGrass = false
+		}
 		respPrintln(respSep)
+		if viewer == "batcat" && out.Len() == 0 {
+			buffers["%viewer"] = reply
+			respPrintln("(Stored long output in %viewer. Use !view %viewer.)")
+		}
 		buffers["%code"] = lastCodeBlock(reply)
 		if auditMode {
 			auditLog = append(auditLog, reply)

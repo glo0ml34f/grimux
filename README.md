@@ -4,6 +4,7 @@ Grimux is a whimsical tmux REPL designed for hackers who love composable text wo
 
 ## Why Buffers and Panes?
 Buffers are named scratch spaces like `%file`, `%code`, `%@` and whatever else you invent. Commands read from and write to these buffers so you can chain actions together. Panes are referenced by their tmux id (for example `%1`). Capture pane output with `!observe` and it lands in a buffer ready for editing, AI prompts or shell commands.
+Pane ids themselves behave like buffers – read from `%1` to capture that pane or write to it to send keystrokes.
 
 ## Core Workflow
 1. Use `!ls` to view panes and buffers.
@@ -34,6 +35,10 @@ The goal is low friction hacking. You work entirely in text buffers and every co
 - `!sum <buffer>` – summarize buffer with the AI
 - `!ascii <buffer>` – convert first five words to gothic ascii art
 - `!nc <buffer> <args>` – pipe buffer through netcat
+- `!curl <url> [buf]` – HTTP GET storing the body
+- `!view <buffer>` – open buffer in `$VIEWER`
+- `!eat <buffer> <pane>` – capture entire scrollback
+- `!rm <buffer>` – delete a buffer
 - `!a <prompt>` – ask the AI with the configured prefix
 - `!help` – show this help
 - `!helpme <question>` – send `!help` output and your question to the AI for terse support
@@ -66,3 +71,4 @@ go test ./...
 ```
 
 Grimux keeps high scores from `!game` in your session and strives for minimal friction. Have fun, get stuff done and let the agents whisper their arcane knowledge!
+![grimux](docs/screenshot.png)
