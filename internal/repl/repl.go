@@ -18,6 +18,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/charmbracelet/glamour"
+	"github.com/chzyer/readline"
+
 	"github.com/example/grimux/internal/input"
 	"github.com/example/grimux/internal/openai"
 	"github.com/example/grimux/internal/tmux"
@@ -100,7 +103,7 @@ const defaultAskPrefix = "You are a offensive security co-pilot, please answer t
 var askPrefix = defaultAskPrefix
 
 // chatPrefix is used when the user types plain text without a command.
-const chatPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Provide succinct responses: "
+const chatPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Provide succinct responses formatted in Markdown: "
 
 func loadConfig() {
 	home, err := os.UserHomeDir()
@@ -188,6 +191,15 @@ func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnCo
 func ok() string              { return colorize(successColor, "✅") }
 
 var respSep = colorize(respColor, strings.Repeat("─", 40))
+
+func renderMarkdown(md string) {
+	out, err := glamour.Render(md, "dark")
+	if err != nil {
+		respPrintln(md)
+		return
+	}
+	respPrintln(out)
+}
 
 // SetSessionFile changes the path used when loading or saving session state.
 func SetSessionFile(path string) {
@@ -603,8 +615,7 @@ func Run() error {
 		}
 	}
 	loadConfig()
-	// load session before switching to raw mode
-	reader := bufio.NewReader(os.Stdin)
+	// load session before starting readline
 	history = []string{}
 	buffers = map[string]string{"%file": "", "%code": "", "%@": ""}
 	if sessionFile != "" {
@@ -678,11 +689,20 @@ func Run() error {
 		}
 	}()
 
-	reader = bufio.NewReader(os.Stdin)
-	histIdx := 0
-	lineBuf := []rune{}
-	cursor := 0
-	lastQuestion := false
+	rl, err := readline.NewEx(&readline.Config{HistoryFile: filepath.Join(home, ".grimux_history")})
+	if err != nil {
+		return err
+	}
+	defer rl.Close()
+	input.SetReadline(rl)
+
+	setPrompt := func() {
+		if sessionName != "" {
+			rl.SetPrompt(fmt.Sprintf("\033[1;35mgrimux(%s)😈> \033[0m", sessionName))
+		} else {
+			rl.SetPrompt("\033[1;35mgrimux😈> \033[0m")
+		}
+	}
 
 	if !seriousMode {
 		cprintln(asciiArt + "\nWelcome to grimux! 💀")
@@ -708,7 +728,7 @@ func Run() error {
 			if err == nil {
 				cprintln("Checking OpenAI integration... " + ok())
 				respPrintln(respSep)
-				respPrintln(reply)
+				renderMarkdown(reply)
 				forceEnter()
 				respPrintln(respSep)
 				bootScreen()
@@ -718,374 +738,63 @@ func Run() error {
 		}
 	}
 
-	prompt := func() {
-		if sessionName != "" {
-			fmt.Printf("\033[1;35mgrimux(%s)😈> \033[0m", sessionName)
-		} else {
-			fmt.Print("\033[1;35mgrimux😈> \033[0m")
-		}
-	}
-
-	clearScreen := func() {
-		fmt.Print("\033[H\033[2J")
-	}
-
-	printLine := func() {
-		fmt.Print("\r\033[K")
-		prompt()
-		fmt.Print(string(lineBuf))
-		if cursor < len(lineBuf) {
-			fmt.Printf("\033[%dD", len(lineBuf)-cursor)
-		}
-	}
-
-	autocomplete := func() {
-		prefix := string(lineBuf)
-		fields := strings.Fields(prefix)
-		if len(fields) > 0 && (fields[0] == "!save" || fields[0] == "!load" || fields[0] == "!file") {
-			if len(fields) >= 2 && !strings.HasSuffix(prefix, " ") {
-				pattern := fields[len(fields)-1] + "*"
-				matches, _ := filepath.Glob(pattern)
-				if len(matches) == 1 {
-					fields[len(fields)-1] = matches[0]
-					lineBuf = []rune(strings.Join(fields, " "))
-					cursor = len(lineBuf)
-					printLine()
-					return
-				}
-				if len(matches) > 1 {
-					cprintln("")
-					cprintln(strings.Join(matches, "  "))
-					printLine()
-					return
-				}
-			}
-		}
-		if len(fields) > 0 && strings.HasPrefix(fields[len(fields)-1], "%") && !strings.HasSuffix(prefix, " ") {
-			last := fields[len(fields)-1]
-			matches := []string{}
-			for name := range buffers {
-				if strings.HasPrefix(name, last) {
-					matches = append(matches, name)
-				}
-			}
-			if len(matches) == 1 {
-				fields[len(fields)-1] = matches[0]
-				lineBuf = []rune(strings.Join(fields, " "))
-				cursor = len(lineBuf)
-				printLine()
-				return
-			}
-			if len(matches) > 1 {
-				cprintln("")
-				cprintln(strings.Join(matches, "  "))
-				printLine()
-				return
-			}
-		}
-		matches := []string{}
-		for _, c := range commandOrder {
-			if strings.HasPrefix(c, prefix) {
-				matches = append(matches, c)
-			}
-		}
-		if len(matches) == 0 {
-			return
-		}
-		if len(matches) == 1 {
-			lineBuf = []rune(matches[0])
-			cursor = len(lineBuf)
-			printLine()
-			return
-		}
-		cprintln("")
-		cprintln(strings.Join(matches, "  "))
-		printLine()
-	}
-
-	reverseSearch := func() {
-		fmt.Print("\n(reverse-i-search)")
-		query := ""
-		for {
-			r, _, err := reader.ReadRune()
-			if err != nil {
-				return
-			}
-			if r == '\n' || r == '\r' {
-				break
-			}
-			query += string(r)
-		}
-		for i := len(history) - 1; i >= 0; i-- {
-			if strings.Contains(history[i], query) {
-				cprint("\n")
-				cprintln(history[i])
-				lineBuf = []rune(history[i])
-				cursor = len(lineBuf)
-				histIdx = i
-				break
-			}
-		}
-		printLine()
-	}
-
-	paramHelp := func() bool {
-		line := string(lineBuf)
-		fields := strings.Fields(line)
-		if len(fields) == 0 || fields[0][0] != '!' {
-			return false
-		}
-		info, ok := commands[fields[0]]
-		if !ok {
-			return false
-		}
-		var idx int
-		if len(fields) == 1 {
-			idx = 0
-		} else if strings.HasSuffix(line, " ") {
-			idx = len(fields) - 1
-		} else {
-			idx = len(fields) - 2
-		}
-		if idx < 0 || idx >= len(info.Params) {
-			return false
-		}
-		p := info.Params[idx]
-		cprintln("")
-		cprintln(p.Name + " - " + p.Desc)
-		printLine()
-		return true
-	}
-
-	currentParam := func() (*paramInfo, bool) {
-		line := string(lineBuf)
-		fields := strings.Fields(line)
-		if len(fields) == 0 || fields[0][0] != '!' {
-			return nil, false
-		}
-		info, ok := commands[fields[0]]
-		if !ok {
-			return nil, false
-		}
-		var idx int
-		if len(fields) == 1 {
-			idx = 0
-		} else if strings.HasSuffix(line, " ") {
-			idx = len(fields) - 1
-		} else {
-			idx = len(fields) - 2
-		}
-		if idx < 0 || idx >= len(info.Params) {
-			return nil, false
-		}
-		p := info.Params[idx]
-		return &p, true
-	}
-
+	setPrompt()
 	for {
-		r, _, err := reader.ReadRune()
-		if err != nil {
-			return err
-		}
-		switch r {
-		case '\n', '\r':
-			lastQuestion = false
-			line := string(lineBuf)
-			lineBuf = []rune{}
-			cursor = 0
-			cprintln("")
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
-				emptyCount++
-				if emptyCount >= 3 {
-					cprintln(grassMessage())
-					emptyCount = 0
-				}
-				prompt()
-				continue
+				cprintln("")
+				return nil
 			}
-			emptyCount = 0
-			if line == string(rune(12)) { // ctrl+l
-				clearScreen()
-				fmt.Println()
-				prompt()
-				maybeCheckEight()
-				continue
-			}
-			if line[0] == '!' {
-				if handleCommand(line) {
-					return nil
-				}
-				history = append(history, line)
-				histIdx = len(history)
-			} else {
-				client, err := openai.NewClient()
-				if err != nil {
-					cmdPrintln(err.Error())
-				} else {
-					promptText := replaceBufferRefs(replacePaneRefs(line))
-					promptText = chatPrefix + promptText
-					stop := spinner()
-					reply, err := client.SendPrompt(promptText)
-					stop()
-					if err != nil {
-						cprintln("openai error: " + err.Error())
-					} else {
-						respPrintln(respSep)
-						respPrintln(reply)
-						respPrintln(respSep)
-						buffers["%code"] = lastCodeBlock(reply)
-						if auditMode {
-							auditLog = append(auditLog, reply)
-							maybeSummarizeAudit()
-						}
-						forceEnter()
-					}
-				}
-				history = append(history, line)
-				histIdx = len(history)
-			}
-			fmt.Println()
-			prompt()
-		case 1: // Ctrl+A
-			cursor = 0
-			printLine()
-		case 5: // Ctrl+E
-			cursor = len(lineBuf)
-			printLine()
-		case 21: // Ctrl+U
-			lineBuf = []rune{}
-			cursor = 0
-			printLine()
-		case 12: // Ctrl+L
-			lastQuestion = false
-			clearScreen()
-			fmt.Println()
-			prompt()
-		case 3: // Ctrl+C
-			lastQuestion = false
-			cprintln("")
-			return nil
-		case 4: // Ctrl+D
-			lastQuestion = false
-			cprintln("")
-			return nil
-		case 7: // Ctrl+G start command
-			lastQuestion = false
-			lineBuf = []rune{'!'}
-			cursor = 1
-			printLine()
-			autocomplete()
-		case 127: // Backspace
-			if cursor > 0 {
-				lastQuestion = false
-				lineBuf = append(lineBuf[:cursor-1], lineBuf[cursor:]...)
-				cursor--
-				printLine()
-			}
-		case 9: // Tab
-			lastQuestion = false
-			if p, ok := currentParam(); ok && strings.Contains(p.Name, "buffer") {
-				line := string(lineBuf)
-				fields := strings.Fields(line)
-				var last string
-				if strings.HasSuffix(line, " ") || len(fields) <= 1 {
-					last = ""
-				} else {
-					last = fields[len(fields)-1]
-				}
-				if last == "" {
-					lineBuf = append(lineBuf, '%')
-					cursor++
-					printLine()
-				} else if !strings.HasPrefix(last, "%") {
-					prefixLen := len(lineBuf) - len([]rune(last))
-					lineBuf = append(lineBuf[:prefixLen], append([]rune{'%'}, lineBuf[prefixLen:]...)...)
-					cursor++
-					printLine()
-				}
-			}
-			if paramHelp() {
-				lastQuestion = true
-			}
-			autocomplete()
-		case 18: // Ctrl+R reverse search
-			lastQuestion = false
-			reverseSearch()
-		case '?':
-			if len(lineBuf) == 0 {
-				handleCommand("!help")
-				prompt()
-				break
-			}
-			if lastQuestion || !paramHelp() {
-				lineBuf = append(lineBuf[:cursor], append([]rune{'?'}, lineBuf[cursor:]...)...)
-				cursor++
-				printLine()
-				lastQuestion = false
-			} else {
-				lastQuestion = true
-			}
-		case 27: // escape sequences (arrows or alt-digit)
-			lastQuestion = false
-			next1, _, err := reader.ReadRune()
-			if err != nil {
-				return err
-			}
-			if next1 >= '0' && next1 <= '9' {
-				token := fmt.Sprintf("{%%%c}", next1)
-				lineBuf = append(lineBuf[:cursor], append([]rune(token), lineBuf[cursor:]...)...)
-				cursor += len([]rune(token))
-				printLine()
-				continue
-			}
-			if next1 != '[' {
-				lineBuf = []rune{'!'}
-				cursor = 1
-				printLine()
-				autocomplete()
-				continue
-			}
-			next2, _, err := reader.ReadRune()
-			if err != nil {
-				return err
-			}
-			switch next2 {
-			case 'A': // Up arrow
-				if histIdx > 0 {
-					histIdx--
-					lineBuf = []rune(history[histIdx])
-					cursor = len(lineBuf)
-					printLine()
-				}
-			case 'B': // Down arrow
-				if histIdx < len(history)-1 {
-					histIdx++
-					lineBuf = []rune(history[histIdx])
-					cursor = len(lineBuf)
-					printLine()
-				} else if histIdx == len(history)-1 {
-					histIdx = len(history)
-					lineBuf = []rune{}
-					cursor = 0
-					printLine()
-				}
-			case 'C': // Right arrow
-				if cursor < len(lineBuf) {
-					cursor++
-					printLine()
-				}
-			case 'D': // Left arrow
-				if cursor > 0 {
-					cursor--
-					printLine()
-				}
-			}
-		default:
-			lastQuestion = false
-			lineBuf = append(lineBuf[:cursor], append([]rune{r}, lineBuf[cursor:]...)...)
-			cursor++
-			printLine()
+			continue
 		}
+		if err == io.EOF {
+			cprintln("")
+			return nil
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			emptyCount++
+			if emptyCount >= 3 {
+				cprintln(grassMessage())
+				emptyCount = 0
+			}
+			setPrompt()
+			continue
+		}
+		emptyCount = 0
+		if strings.HasPrefix(line, "!") {
+			if handleCommand(line) {
+				return nil
+			}
+			history = append(history, line)
+		} else {
+			client, err := openai.NewClient()
+			if err != nil {
+				cmdPrintln(err.Error())
+			} else {
+				promptText := replaceBufferRefs(replacePaneRefs(line))
+				promptText = chatPrefix + promptText
+				stop := spinner()
+				reply, err := client.SendPrompt(promptText)
+				stop()
+				if err != nil {
+					cprintln("openai error: " + err.Error())
+				} else {
+					respPrintln(respSep)
+					renderMarkdown(reply)
+					respPrintln(respSep)
+					buffers["%code"] = lastCodeBlock(reply)
+					if auditMode {
+						auditLog = append(auditLog, reply)
+						maybeSummarizeAudit()
+					}
+					forceEnter()
+				}
+			}
+			history = append(history, line)
+		}
+		setPrompt()
 	}
 }
 
@@ -1700,6 +1409,8 @@ func handleCommand(cmd string) bool {
 		}
 		cmd := exec.Command(viewer, "-l", "markdown")
 		cmd.Stdin = strings.NewReader(data)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
 		viewerRunning = true
 		if err := cmd.Run(); err != nil {
 			cmdPrintln(viewer + " error: " + err.Error())

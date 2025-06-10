@@ -4,10 +4,22 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+
+	"github.com/chzyer/readline"
 )
+
+var rl *readline.Instance
+
+// SetReadline assigns the global readline instance used for interactive input.
+func SetReadline(r *readline.Instance) { rl = r }
 
 // ReadPassword reads a line from stdin without echoing the input.
 func ReadPassword() (string, error) {
+	if rl != nil {
+		b, err := rl.ReadPassword("")
+		fmt.Println()
+		return string(b), err
+	}
 	old, err := startRaw()
 	if err != nil {
 		return "", err
@@ -31,6 +43,9 @@ func ReadPassword() (string, error) {
 
 // ReadLine reads a line from stdin echoing the input.
 func ReadLine() (string, error) {
+	if rl != nil {
+		return rl.Readline()
+	}
 	reader := bufio.NewReader(os.Stdin)
 	var buf []rune
 	for {
