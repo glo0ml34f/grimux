@@ -13,6 +13,27 @@ var rl *readline.Instance
 // SetReadline assigns the global readline instance used for interactive input.
 func SetReadline(r *readline.Instance) { rl = r }
 
+// ReadPasswordPrompt reads a secret line displaying the given prompt.
+func ReadPasswordPrompt(prompt string) (string, error) {
+	if rl != nil {
+		b, err := rl.ReadPassword(prompt)
+		fmt.Fprintln(rl.Stdout())
+		return string(b), err
+	}
+	fmt.Fprint(os.Stdout, prompt)
+	return ReadPassword()
+}
+
+// ReadLinePrompt reads a line showing the given prompt.
+func ReadLinePrompt(prompt string) (string, error) {
+	if rl != nil {
+		fmt.Fprint(rl.Stdout(), prompt)
+		return rl.Readline()
+	}
+	fmt.Fprint(os.Stdout, prompt)
+	return ReadLine()
+}
+
 // ReadPassword reads a line from stdin without echoing the input.
 func ReadPassword() (string, error) {
 	if rl != nil {

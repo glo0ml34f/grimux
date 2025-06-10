@@ -21,9 +21,9 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/chzyer/readline"
 
-	"github.com/example/grimux/internal/input"
-	"github.com/example/grimux/internal/openai"
-	"github.com/example/grimux/internal/tmux"
+	"github.com/glo0ml34f/grimux/internal/input"
+	"github.com/glo0ml34f/grimux/internal/openai"
+	"github.com/glo0ml34f/grimux/internal/tmux"
 )
 
 var capturePane = tmux.CapturePane
@@ -94,6 +94,7 @@ var auditSummary string
 var startTime time.Time
 var askedEight bool
 var emptyCount int
+var Version string
 
 var banFile string
 
@@ -218,6 +219,12 @@ func SetAuditMode(v bool) { auditMode = v }
 // SetBanFile sets the path used to block grimux on startup.
 func SetBanFile(path string) { banFile = path }
 
+// SetVersion stores the current version string.
+func SetVersion(v string) { Version = v }
+
+// GetVersion returns the current version string.
+func GetVersion() string { return Version }
+
 type paramInfo struct {
 	Name string
 	Desc string
@@ -233,7 +240,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!eat", "!view", "!rm", "!game", "!help", "!helpme",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!eat", "!view", "!rm", "!game", "!version", "!help", "!helpme",
 }
 
 var commands = map[string]commandInfo{
@@ -273,6 +280,7 @@ var commands = map[string]commandInfo{
 	"!view":       {Usage: "!view <buffer>", Desc: "show buffer in $VIEWER", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rm":         {Usage: "!rm <buffer>", Desc: "remove a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
+	"!version":    {Usage: "!version", Desc: "show grimux version"},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 	"!helpme":     {Usage: "!helpme <question>", Desc: "ask the AI for help using grimux"},
@@ -1446,6 +1454,8 @@ func handleCommand(cmd string) bool {
 		delete(buffers, name)
 	case "!game":
 		playGame()
+	case "!version":
+		cmdPrintln(fmt.Sprintf("jayne <gloomlead@pm.me> says the version is: %s", Version))
 	case "!a":
 		if len(fields) < 2 {
 			usage("!a")
@@ -1465,30 +1475,9 @@ func handleCommand(cmd string) bool {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
-		viewer := os.Getenv("VIEWER")
-		if viewer == "" {
-			viewer = "batcat"
-		}
-		args := []string{"-l", "markdown"}
-		cmd := exec.Command(viewer, args...)
-		cmd.Stdin = strings.NewReader(reply)
-		var out bytes.Buffer
-		cmd.Stdout = io.MultiWriter(os.Stdout, &out)
-		viewerRunning = true
 		respPrintln(respSep)
-		if err := cmd.Run(); err != nil {
-			cmdPrintln(viewer + " error: " + err.Error())
-		}
-		viewerRunning = false
-		if pendingGrass {
-			cprintln(grassMessage())
-			pendingGrass = false
-		}
+		renderMarkdown(reply)
 		respPrintln(respSep)
-		if viewer == "batcat" && out.Len() == 0 {
-			buffers["%viewer"] = reply
-			respPrintln("(Stored long output in %viewer. Use !view %viewer.)")
-		}
 		buffers["%code"] = lastCodeBlock(reply)
 		if auditMode {
 			auditLog = append(auditLog, reply)
