@@ -689,12 +689,21 @@ func Run() error {
 		}
 	}()
 
-	rl, err := readline.NewEx(&readline.Config{HistoryFile: filepath.Join(home, ".grimux_history")})
+	cfg := readline.Config{
+		DisableAutoSaveHistory: true,
+		AutoComplete:           &autoCompleter{},
+		Listener:               &helpListener{},
+	}
+	rl, err := readline.NewEx(&cfg)
 	if err != nil {
 		return err
 	}
 	defer rl.Close()
 	input.SetReadline(rl)
+	rl.ResetHistory()
+	for _, h := range history {
+		rl.SaveHistory(h)
+	}
 
 	setPrompt := func() {
 		if sessionName != "" {
@@ -768,6 +777,7 @@ func Run() error {
 				return nil
 			}
 			history = append(history, line)
+			rl.SaveHistory(line)
 		} else {
 			client, err := openai.NewClient()
 			if err != nil {
@@ -793,6 +803,7 @@ func Run() error {
 				}
 			}
 			history = append(history, line)
+			rl.SaveHistory(line)
 		}
 		setPrompt()
 	}
