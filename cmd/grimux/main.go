@@ -4,29 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/glo0ml34f/grimux/internal/repl"
 )
 
-var version = getVersion()
-
-func getVersion() string {
-	cmd := exec.Command("git", "tag", "--points-at", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return "dev"
-	}
-	tags := strings.Fields(string(out))
-	for _, t := range tags {
-		if strings.HasPrefix(t, "v") && strings.Count(t, ".") == 1 {
-			return t
-		}
-	}
-	return "dev"
-}
+// version is set at build time using -ldflags. Default is "dev".
+var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version")

@@ -617,11 +617,7 @@ func Run() error {
 	if _, err := os.Stat(banFile); err == nil {
 		return fmt.Errorf("grimux refuses to run: ban file present")
 	}
-	if !seriousMode {
-		if err := checkDeps(); err != nil {
-			return err
-		}
-	}
+	// dependency check happens after OpenAI configuration
 	loadConfig()
 	// load session before starting readline
 	history = []string{}
@@ -730,7 +726,8 @@ func Run() error {
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	if client, err := openai.NewClient(); err != nil {
+	client, err := openai.NewClient()
+	if err != nil {
 		if !seriousMode {
 			cprintln("⚠️  " + err.Error())
 		}
@@ -752,6 +749,13 @@ func Run() error {
 			} else {
 				cprintln("openai error: " + err.Error())
 			}
+		}
+	}
+
+	if !seriousMode {
+		if err := checkDeps(); err != nil {
+			cprintln("dependency error: " + err.Error())
+			return err
 		}
 	}
 
@@ -1455,7 +1459,7 @@ func handleCommand(cmd string) bool {
 	case "!game":
 		playGame()
 	case "!version":
-		cmdPrintln(fmt.Sprintf("jayne <gloomlead@pm.me> says the version is: %s", Version))
+		cmdPrintln(fmt.Sprintf("jayne <gloomleaf@pm.me> says the version is: %s", Version))
 	case "!a":
 		if len(fields) < 2 {
 			usage("!a")
