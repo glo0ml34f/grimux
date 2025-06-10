@@ -689,12 +689,20 @@ func Run() error {
 		}
 	}()
 
-	rl, err := readline.NewEx(&readline.Config{HistoryFile: filepath.Join(home, ".grimux_history")})
+	cfg := readline.Config{
+		DisableAutoSaveHistory: true,
+		AutoComplete:           &autoCompleter{},
+		Listener:               &helpListener{},
+	}
+	rl, err := readline.NewEx(&cfg)
 	if err != nil {
 		return err
 	}
 	defer rl.Close()
 	input.SetReadline(rl)
+	for _, h := range history {
+		rl.SaveHistory(h)
+	}
 
 	setPrompt := func() {
 		if sessionName != "" {
