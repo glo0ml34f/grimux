@@ -700,6 +700,7 @@ func Run() error {
 	}
 	defer rl.Close()
 	input.SetReadline(rl)
+	rl.ResetHistory()
 	for _, h := range history {
 		rl.SaveHistory(h)
 	}
@@ -776,6 +777,7 @@ func Run() error {
 				return nil
 			}
 			history = append(history, line)
+			rl.SaveHistory(line)
 		} else {
 			client, err := openai.NewClient()
 			if err != nil {
@@ -801,6 +803,7 @@ func Run() error {
 				}
 			}
 			history = append(history, line)
+			rl.SaveHistory(line)
 		}
 		setPrompt()
 	}

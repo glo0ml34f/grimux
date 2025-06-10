@@ -52,7 +52,7 @@ func NewClient() (*Client, error) {
 		key = sessionAPIKey
 	}
 	if key == "" {
-		fmt.Print("OpenAI API key: ")
+		fmt.Fprint(os.Stdout, "OpenAI API key: ")
 		line, err := input.ReadPassword()
 		if err != nil {
 			return nil, err
@@ -69,7 +69,7 @@ func NewClient() (*Client, error) {
 		url = sessionAPIURL
 	}
 	if url == "" {
-		fmt.Printf("OpenAI API URL [%s]: ", defaultAPIURL)
+		fmt.Fprintf(os.Stdout, "OpenAI API URL [%s]: ", defaultAPIURL)
 		line, err := input.ReadLine()
 		if err != nil {
 			return nil, err
