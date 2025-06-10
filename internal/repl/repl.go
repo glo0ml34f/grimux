@@ -823,6 +823,12 @@ func Run() error {
 
 // handleCommand executes a ! command. Returns true if repl should quit.
 func saveSession() {
+	// Temporarily disable readline so prompts work correctly in raw mode
+	rl := input.GetReadline()
+	if rl != nil {
+		input.SetReadline(nil)
+		defer input.SetReadline(rl)
+	}
 	if sessionFile == "" {
 		if sessionName != "" {
 			cprint(fmt.Sprintf("Session name [%s]: ", sessionName))
