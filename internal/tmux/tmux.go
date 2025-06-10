@@ -88,3 +88,21 @@ func SendKeys(target string, keys ...string) error {
 	cmd := exec.Command("tmux", args...)
 	return cmd.Run()
 }
+
+// ListPaneIDs returns the IDs of all tmux panes.
+func ListPaneIDs() ([]string, error) {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return nil, errors.New("TMUX environment variable is not set")
+	}
+	socket := strings.Split(tmuxEnv, ",")[0]
+	args := []string{"-S", socket, "list-panes", "-F", "#{pane_id}"}
+	cmd := exec.Command("tmux", args...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("tmux command: %w", err)
+	}
+	out := strings.Fields(buf.String())
+	return out, nil
+}
