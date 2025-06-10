@@ -48,6 +48,26 @@ func CapturePane(target string) (string, error) {
 	return buf.String(), nil
 }
 
+// CapturePaneFull grabs the entire scrollback of the pane.
+func CapturePaneFull(target string) (string, error) {
+	tmuxEnv := os.Getenv("TMUX")
+	if tmuxEnv == "" {
+		return "", errors.New("TMUX environment variable is not set")
+	}
+	socket := strings.Split(tmuxEnv, ",")[0]
+	args := []string{"-S", socket, "capture-pane", "-p", "-J", "-S", "-32768"}
+	if target != "" {
+		args = append(args, "-t", target)
+	}
+	cmd := exec.Command("tmux", args...)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("tmux command: %w", err)
+	}
+	return buf.String(), nil
+}
+
 // SendKeys sends the given keys to the specified pane using tmux send-keys.
 // The keys slice is passed as individual arguments to the tmux command.
 func SendKeys(target string, keys ...string) error {
