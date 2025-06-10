@@ -693,6 +693,7 @@ func Run() error {
 		}
 	}()
 
+	client, err := openai.NewClient()
 	cfg := readline.Config{
 		DisableAutoSaveHistory: true,
 		AutoComplete:           &autoCompleter{},
@@ -726,7 +727,6 @@ func Run() error {
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	client, err := openai.NewClient()
 	if err != nil {
 		if !seriousMode {
 			cprintln("⚠️  " + err.Error())
