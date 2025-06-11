@@ -191,15 +191,17 @@ func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(succes
 func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, s)) }
 func ok() string              { return colorize(successColor, "✅") }
 
-var respSep = colorize(respColor, strings.Repeat("─", 40))
+var respSep = strings.Repeat("─", 40)
 
 func renderMarkdown(md string) {
 	out, err := glamour.Render(md, "dark")
 	if err != nil {
-		respPrintln(md)
+		captureOut(md, true)
+		fmt.Println(colorize(respColor, md))
 		return
 	}
-	respPrintln(out)
+	captureOut(md, true)
+	fmt.Println(colorize(respColor, out))
 }
 
 // SetSessionFile changes the path used when loading or saving session state.
@@ -239,7 +241,7 @@ type commandInfo struct {
 var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
-	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!run_on", "!flow",
+	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!md", "!run_on", "!flow",
 	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!eat", "!view", "!rm", "!game", "!version", "!help", "!helpme",
 }
 
@@ -262,6 +264,7 @@ var commands = map[string]commandInfo{
 	"!unset":      {Usage: "!unset <buffer>", Desc: "clear buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
 	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
+	"!md":         {Usage: "!md <buffer> [source]", Desc: "render markdown from source buffer", Params: []paramInfo{{"<buffer>", "destination"}, {"[source]", "source buffer"}}},
 	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
 	"!flow":       {Usage: "!flow <buf1> [buf2 ... buf10]", Desc: "chain prompts using buffers", Params: []paramInfo{{"<buf>", "buffer name"}}},
 	"!grep":       {Usage: "!grep <regex> [buffers...]", Desc: "search buffers for regex", Params: []paramInfo{{"<regex>", "regular expression"}, {"[buffers...]", "optional buffers"}}},
@@ -556,45 +559,121 @@ func maybeSummarizeAudit() {
 	}
 }
 
+func sessionSnapshot() session {
+	bufCopy := make(map[string]string)
+	for k, v := range buffers {
+		if k == "%session" {
+			continue
+		}
+		bufCopy[k] = v
+	}
+	return session{History: history, Buffers: bufCopy, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary}
+}
+
+func loadSessionFromBuffer() {
+	data, ok := buffers["%session"]
+	if !ok {
+		return
+	}
+	var s session
+	if err := json.Unmarshal([]byte(data), &s); err != nil {
+		return
+	}
+	if s.Prompt != "" {
+		askPrefix = s.Prompt
+	}
+	if s.APIKey != "" {
+		openai.SetSessionAPIKey(s.APIKey)
+	}
+	if s.APIURL != "" {
+		openai.SetSessionAPIURL(s.APIURL)
+	}
+	if s.Model != "" {
+		openai.SetModelName(s.Model)
+	}
+	if s.HighScore != 0 {
+		highScore = s.HighScore
+	}
+	if len(s.History) > 0 {
+		history = s.History
+	}
+	if s.Buffers != nil {
+		for k, v := range s.Buffers {
+			if k == "%session" {
+				continue
+			}
+			buffers[k] = v
+		}
+	}
+	if len(s.Audit) > 0 {
+		auditLog = s.Audit
+	}
+	if s.Summary != "" {
+		auditSummary = s.Summary
+	}
+}
+
+func updateSessionBuffer() {
+	s := sessionSnapshot()
+	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
+		buffers["%session"] = string(b)
+	}
+}
+
 func playGame() {
 	for i := 5; i > 0; i-- {
 		cprintln(fmt.Sprintf("%d...", i))
 		time.Sleep(time.Second)
 	}
+	cprintln("Guess the end! Press space when you think time is up.")
 	wait := rand.Intn(10) + 1
-	time.Sleep(time.Duration(wait) * time.Second)
-	cprintln("NOW! Press space!")
-	start := time.Now()
-	reader := bufio.NewReader(os.Stdin)
-	done := make(chan struct{})
+	eventTime := time.Now().Add(time.Duration(wait) * time.Second)
+
+	press := make(chan time.Time, 1)
 	go func() {
+		reader := bufio.NewReader(os.Stdin)
 		for {
 			r, _, err := reader.ReadRune()
 			if err != nil {
 				continue
 			}
 			if r == ' ' {
-				close(done)
+				press <- time.Now()
 				return
 			}
 		}
 	}()
+
+	timer := time.NewTimer(time.Duration(wait) * time.Second)
+	var pressTime time.Time
 	select {
-	case <-done:
-		delta := time.Since(start).Microseconds()
-		if delta == 0 {
-			meltdown()
+	case pressTime = <-press:
+		<-timer.C
+	case <-timer.C:
+		cprintln("NOW! Press space!")
+		select {
+		case pressTime = <-press:
+		case <-time.After(3 * time.Second):
+			cprintln("Too slow! Score 0")
 			return
 		}
-		score := int(1000000 / (delta + 1))
-		if score > highScore {
-			highScore = score
-			cprintln(fmt.Sprintf("New high score: %d", highScore))
-		} else {
-			cprintln(fmt.Sprintf("Score %d - best %d", score, highScore))
-		}
-	case <-time.After(3 * time.Second):
+	}
+
+	diff := eventTime.Sub(pressTime)
+	if diff < 0 {
 		cprintln("Too slow! Score 0")
+		return
+	}
+	if diff == 0 {
+		meltdown()
+		return
+	}
+	score := int(1000000 / (diff.Microseconds() + 1))
+	if score > highScore {
+		highScore = score
+		cprintln(fmt.Sprintf("New high score: %d", highScore))
+	} else {
+		cprintln(fmt.Sprintf("Score %d - best %d", score, highScore))
 	}
 }
 
@@ -621,7 +700,7 @@ func Run() error {
 	loadConfig()
 	// load session before starting readline
 	history = []string{}
-	buffers = map[string]string{"%file": "", "%code": "", "%@": ""}
+	buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": ""}
 	if sessionFile != "" {
 		if b, err := os.ReadFile(sessionFile); err == nil {
 			var s session
@@ -642,10 +721,13 @@ func Run() error {
 			history = s.History
 			buffers = s.Buffers
 			if buffers == nil {
-				buffers = map[string]string{"%file": "", "%code": "", "%@": ""}
+				buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": ""}
 			}
 			if _, ok := buffers["%@"]; !ok {
 				buffers["%@"] = ""
+			}
+			if _, ok := buffers["%session"]; !ok {
+				buffers["%session"] = ""
 			}
 			if s.Prompt != "" {
 				askPrefix = s.Prompt
@@ -669,6 +751,8 @@ func Run() error {
 	if sessionFile != "" && sessionName == "" {
 		sessionName = strings.TrimSuffix(filepath.Base(sessionFile), ".grimux")
 	}
+
+	updateSessionBuffer()
 
 	oldState, err := startRaw()
 	if err != nil {
@@ -872,9 +956,10 @@ func saveSession() {
 
 func handleCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
+	loadSessionFromBuffer()
 	var capBuf bytes.Buffer
 	capture := true
-	if len(fields) > 0 && fields[0] == "!game" {
+	if len(fields) > 0 && (fields[0] == "!game" || fields[0] == "!md") {
 		capture = false
 	}
 	if capture {
@@ -885,6 +970,7 @@ func handleCommand(cmd string) bool {
 			buffers["%@"] = capBuf.String()
 		}
 		outputCapture = nil
+		updateSessionBuffer()
 	}()
 	usage := func(name string) {
 		if info, ok := commands[name]; ok {
@@ -1078,7 +1164,7 @@ func handleCommand(cmd string) bool {
 		}
 		buffers[fields[1]] = lastCodeBlock(reply)
 		respPrintln(respSep)
-		respPrintln(reply)
+		renderMarkdown(reply)
 		respPrintln(respSep)
 		if auditMode {
 			auditLog = append(auditLog, reply)
@@ -1112,7 +1198,7 @@ func handleCommand(cmd string) bool {
 		writeBuffer(name, text)
 	case "!prefix":
 		if len(fields) < 2 {
-			usage("!prefix")
+			askPrefix = defaultAskPrefix
 			return false
 		}
 		src := fields[1]
@@ -1134,7 +1220,7 @@ func handleCommand(cmd string) bool {
 	case "!reset":
 		askPrefix = defaultAskPrefix
 		history = []string{}
-		buffers = map[string]string{"%file": "", "%code": "", "%@": ""}
+		buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": ""}
 		sessionFile = ""
 		sessionName = ""
 		sessionPass = ""
@@ -1158,10 +1244,33 @@ func handleCommand(cmd string) bool {
 	case "!get_prompt":
 		cmdPrintln(askPrefix)
 	case "!session":
-		s := session{History: history, Buffers: buffers, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary}
+		s := sessionSnapshot()
 		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 			buffers["%session"] = string(b)
 		}
+	case "!md":
+		if len(fields) < 2 {
+			usage("!md")
+			return false
+		}
+		dest := fields[1]
+		src := "%@"
+		if len(fields) >= 3 {
+			src = fields[2]
+		}
+		data, ok := buffers[src]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		out, err := glamour.Render(data, "dark")
+		if err != nil {
+			cmdPrintln("render error: " + err.Error())
+			return false
+		}
+		buffers[dest] = out
+		fmt.Print(colorize(respColor, out))
+		forceEnter()
 	case "!run_on":
 		if len(fields) < 4 {
 			usage("!run_on")
@@ -1485,10 +1594,11 @@ func handleCommand(cmd string) bool {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
+		code := lastCodeBlock(reply)
 		respPrintln(respSep)
 		renderMarkdown(reply)
 		respPrintln(respSep)
-		buffers["%code"] = lastCodeBlock(reply)
+		buffers["%code"] = code
 		if auditMode {
 			auditLog = append(auditLog, reply)
 			maybeSummarizeAudit()
