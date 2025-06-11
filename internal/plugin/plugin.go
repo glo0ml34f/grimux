@@ -33,12 +33,17 @@ type Plugin struct {
 type Manager struct {
 	plugins map[string]*Plugin
 	dir     string
+	mute    map[string]bool
+	printFn func(*Plugin, string)
 }
 
-var mgr = &Manager{plugins: map[string]*Plugin{}}
+var mgr = &Manager{plugins: map[string]*Plugin{}, mute: map[string]bool{}}
 
 // GetManager returns the global plugin manager.
 func GetManager() *Manager { return mgr }
+
+// SetPrintHandler sets the function used to display plugin output.
+func SetPrintHandler(fn func(*Plugin, string)) { mgr.printFn = fn }
 
 // Dir returns the configured plugin directory.
 func (m *Manager) Dir() string { return m.dir }
@@ -47,6 +52,18 @@ func (m *Manager) Dir() string { return m.dir }
 func (m *Manager) SetDir(dir string) {
 	m.dir = dir
 }
+
+// SetPrintHandler registers a function used to display plugin messages.
+func (m *Manager) SetPrintHandler(fn func(*Plugin, string)) { m.printFn = fn }
+
+// ToggleMute switches the muted state for a plugin and returns the new state.
+func (m *Manager) ToggleMute(name string) bool {
+	m.mute[name] = !m.mute[name]
+	return m.mute[name]
+}
+
+// Muted reports whether prints from the plugin are muted.
+func (m *Manager) Muted(name string) bool { return m.mute[name] }
 
 // LoadAll loads all Lua plugins from the configured directory or
 // ~/.grimux/plugins if none was set.
@@ -85,14 +102,33 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 	L.SetGlobal("plugin", api)
 	L.SetFuncs(api, map[string]lua.LGFunction{
 		"register": func(L *lua.LState) int {
-			infoStr := L.CheckString(1)
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			infoStr := L.CheckString(2)
 			var inf Info
 			if err := json.Unmarshal([]byte(infoStr), &inf); err != nil {
 				L.RaiseError("register: %v", err)
 				return 0
 			}
 			p.Info = inf
-			return 0
+			L.Push(lua.LString(p.Handle))
+			return 1
+		},
+		"print": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			msg := L.CheckString(2)
+			if m.printFn != nil && !m.mute[p.Info.Name] {
+				m.printFn(p, msg)
+			}
+			L.Push(lua.LString(p.Handle))
+			return 1
 		},
 	})
 	if err := L.DoFile(path); err != nil {

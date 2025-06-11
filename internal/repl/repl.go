@@ -167,6 +167,7 @@ const (
 	respColor    = "\033[38;5;205m" // LLM responses
 	successColor = "\033[38;5;82m"  // success messages
 	warnColor    = "\033[38;5;196m" // warnings or important prompts
+	pluginColor  = "\033[38;5;229m" // plugin output
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
@@ -174,6 +175,10 @@ func colorize(color, s string) string { return color + s + "\033[0m" }
 var outputCapture *bytes.Buffer
 var viewerRunning bool // true when $VIEWER is active
 var pendingGrass bool  // track delayed grass messages
+type pluginMsg struct{ name, text string }
+
+var pluginMsgCh = make(chan pluginMsg, 10)
+var queuedMsgs []pluginMsg
 
 func captureOut(text string, newline bool) {
 	if outputCapture != nil {
@@ -190,7 +195,34 @@ func cmdPrintln(s string)     { captureOut(s, true); fmt.Println(colorize(cmdCol
 func respPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(respColor, s)) }
 func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(successColor, s)) }
 func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, s)) }
-func ok() string              { return colorize(successColor, "✅") }
+func pluginPrintln(name, s string) {
+	captureOut(s, true)
+	fmt.Println(colorize(pluginColor, fmt.Sprintf("[plugin:%s] %s", name, s)))
+}
+func ok() string { return colorize(successColor, "✅") }
+
+func flushPluginMsgs() {
+	for {
+		select {
+		case pm := <-pluginMsgCh:
+			if outputCapture != nil || viewerRunning {
+				queuedMsgs = append(queuedMsgs, pm)
+			} else {
+				pluginPrintln(pm.name, pm.text)
+			}
+		default:
+			if len(queuedMsgs) == 0 {
+				return
+			}
+			if outputCapture != nil || viewerRunning {
+				return
+			}
+			pm := queuedMsgs[0]
+			queuedMsgs = queuedMsgs[1:]
+			pluginPrintln(pm.name, pm.text)
+		}
+	}
+}
 
 var respSep = strings.Repeat("─", 40)
 
@@ -283,7 +315,7 @@ var commands = map[string]commandInfo{
 	"!eat":        {Usage: "!eat <buffer> <pane>", Desc: "capture full scrollback", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane id"}}},
 	"!view":       {Usage: "!view <buffer>", Desc: "show buffer in $VIEWER", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rm":         {Usage: "!rm <buffer>", Desc: "remove a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
-	"!plugin":     {Usage: "!plugin <list|unload|reload> [name]", Desc: "manage plugins"},
+	"!plugin":     {Usage: "!plugin <list|unload|reload|mute> [name]", Desc: "manage plugins"},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!version":    {Usage: "!version", Desc: "show grimux version"},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
@@ -755,9 +787,13 @@ func Run() error {
 	}
 
 	updateSessionBuffer()
+	plugin.SetPrintHandler(func(p *plugin.Plugin, msg string) {
+		pluginMsgCh <- pluginMsg{name: p.Info.Name, text: msg}
+	})
 	if err := plugin.GetManager().LoadAll(); err != nil {
 		cprintln("plugin load error: " + err.Error())
 	}
+	flushPluginMsgs()
 
 	oldState, err := startRaw()
 	if err != nil {
@@ -851,6 +887,7 @@ func Run() error {
 
 	setPrompt()
 	for {
+		flushPluginMsgs()
 		line, err := rl.Readline()
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
@@ -871,6 +908,7 @@ func Run() error {
 				emptyCount = 0
 			}
 			setPrompt()
+			flushPluginMsgs()
 			continue
 		}
 		emptyCount = 0
@@ -908,6 +946,7 @@ func Run() error {
 			rl.SaveHistory(line)
 		}
 		setPrompt()
+		flushPluginMsgs()
 	}
 }
 
@@ -1579,7 +1618,7 @@ func handleCommand(cmd string) bool {
 		delete(buffers, name)
 	case "!plugin":
 		if len(fields) < 2 {
-			cmdPrintln("usage: !plugin <list|unload|reload> [name]")
+			cmdPrintln("usage: !plugin <list|unload|reload|mute> [name]")
 			return false
 		}
 		switch fields[1] {
@@ -1602,6 +1641,17 @@ func handleCommand(cmd string) bool {
 			}
 			if err := plugin.GetManager().Reload(fields[2]); err != nil {
 				cmdPrintln(err.Error())
+			}
+		case "mute":
+			if len(fields) < 3 {
+				cmdPrintln("usage: !plugin mute <name>")
+				return false
+			}
+			muted := plugin.GetManager().ToggleMute(fields[2])
+			if muted {
+				cmdPrintln("muted")
+			} else {
+				cmdPrintln("unmuted")
 			}
 		default:
 			cmdPrintln("unknown subcommand")
