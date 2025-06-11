@@ -5,6 +5,8 @@ go 1.24.3
 require (
 	github.com/charmbracelet/glamour v0.6.0
 	github.com/chzyer/readline v1.5.1
+	github.com/google/uuid v1.6.0
+	github.com/yuin/gopher-lua v1.1.1
 )
 
 require (

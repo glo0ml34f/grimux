@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/glo0ml34f/grimux/internal/plugin"
 	"github.com/glo0ml34f/grimux/internal/repl"
 )
 
@@ -16,6 +17,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version")
 	serious := flag.Bool("serious", false, "start in serious mode")
 	audit := flag.Bool("audit", false, "enable audit logging")
+	pluginDir := flag.String("plugins", "", "plugins directory")
 	flag.Parse()
 
 	if *showVersion {
@@ -27,6 +29,9 @@ func main() {
 	repl.SetVersion(version)
 	home, _ := os.UserHomeDir()
 	repl.SetBanFile(filepath.Join(home, ".grimux_banned"))
+	if *pluginDir != "" {
+		plugin.GetManager().SetDir(*pluginDir)
+	}
 	if flag.NArg() > 0 {
 		repl.SetSessionFile(flag.Arg(0))
 	}
