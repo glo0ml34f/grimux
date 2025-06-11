@@ -23,6 +23,7 @@ import (
 
 	"github.com/glo0ml34f/grimux/internal/input"
 	"github.com/glo0ml34f/grimux/internal/openai"
+	"github.com/glo0ml34f/grimux/internal/plugin"
 	"github.com/glo0ml34f/grimux/internal/tmux"
 )
 
@@ -242,7 +243,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!md", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!eat", "!view", "!rm", "!game", "!version", "!help", "!helpme",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme",
 }
 
 var commands = map[string]commandInfo{
@@ -282,6 +283,7 @@ var commands = map[string]commandInfo{
 	"!eat":        {Usage: "!eat <buffer> <pane>", Desc: "capture full scrollback", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane id"}}},
 	"!view":       {Usage: "!view <buffer>", Desc: "show buffer in $VIEWER", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rm":         {Usage: "!rm <buffer>", Desc: "remove a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!plugin":     {Usage: "!plugin <list|unload|reload> [name]", Desc: "manage plugins"},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!version":    {Usage: "!version", Desc: "show grimux version"},
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
@@ -753,12 +755,16 @@ func Run() error {
 	}
 
 	updateSessionBuffer()
+	if err := plugin.GetManager().LoadAll(); err != nil {
+		cprintln("plugin load error: " + err.Error())
+	}
 
 	oldState, err := startRaw()
 	if err != nil {
 		return fmt.Errorf("raw mode: %w", err)
 	}
 	defer stopRaw(oldState)
+	defer plugin.GetManager().Shutdown()
 	defer cprintln(exitMessage())
 
 	startTime = time.Now()
@@ -1571,6 +1577,35 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		delete(buffers, name)
+	case "!plugin":
+		if len(fields) < 2 {
+			cmdPrintln("usage: !plugin <list|unload|reload> [name]")
+			return false
+		}
+		switch fields[1] {
+		case "list":
+			for _, info := range plugin.GetManager().List() {
+				cmdPrintln(fmt.Sprintf("%s %s", info.Name, info.Version))
+			}
+		case "unload":
+			if len(fields) < 3 {
+				cmdPrintln("usage: !plugin unload <name>")
+				return false
+			}
+			if err := plugin.GetManager().Unload(fields[2]); err != nil {
+				cmdPrintln(err.Error())
+			}
+		case "reload":
+			if len(fields) < 3 {
+				cmdPrintln("usage: !plugin reload <name>")
+				return false
+			}
+			if err := plugin.GetManager().Reload(fields[2]); err != nil {
+				cmdPrintln(err.Error())
+			}
+		default:
+			cmdPrintln("unknown subcommand")
+		}
 	case "!game":
 		playGame()
 	case "!version":
