@@ -15,6 +15,7 @@ go build ./cmd/grimux
 ./grimux [session.grimux]
 ```
 Press `?` for inline help or `!help` once the prompt appears.
+For a deeper walkthrough see [docs/guide.md](docs/guide.md)
 
 ## Buffers and panes
 Buffers are scratch spaces like `%file`, `%code` and `%@`. They hold text for
