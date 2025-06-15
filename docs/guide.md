@@ -82,7 +82,9 @@ Below is an expanded reference with ideas for how each command might aid your re
 - `!run [buf] <cmd>` – execute a shell command, optionally piping in a buffer. Use this to compile code or run enumeration scripts.
 - `!run_on <buf> <pane> <cmd>` – capture a pane, run a command with that capture as input, store output in `<buf>`.
 - `!nc <buf> <args>` – pipe a buffer to netcat. Convenient for sending crafted payloads.
-- `!curl <url> [buf]` – fetch a URL directly into a buffer for offline review.
+- `!curl <url> [buf] [hdrs]` – fetch a URL into a buffer, optionally using headers from `hdrs`.
+- `!diff <a> <b> [buf]` – show a colorized diff between buffers or files.
+- `!recap` – summarize the session.
 
 ### AI Integration
 
