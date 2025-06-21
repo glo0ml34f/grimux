@@ -59,3 +59,10 @@ func TestLastCodeBlock(t *testing.T) {
 		t.Fatalf("unexpected last code block: %q", code)
 	}
 }
+
+func TestNullBuffer(t *testing.T) {
+	writeBuffer("%null", "ignored")
+	if val, ok := readBuffer("%null"); !ok || val != "" {
+		t.Fatal("%null should always be empty")
+	}
+}

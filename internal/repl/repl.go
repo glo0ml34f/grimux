@@ -80,6 +80,7 @@ var buffers = map[string]string{
 	"%file": "",
 	"%code": "",
 	"%@":    "",
+	"%null": "",
 }
 
 var history []string
@@ -274,8 +275,8 @@ type commandInfo struct {
 var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!a", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
-	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!md", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme",
+	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!recap", "!md", "!run_on", "!flow",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme",
 }
 
 var commands = map[string]commandInfo{
@@ -297,6 +298,7 @@ var commands = map[string]commandInfo{
 	"!unset":      {Usage: "!unset <buffer>", Desc: "clear buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
 	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
+	"!recap":      {Usage: "!recap", Desc: "summarize session and buffers"},
 	"!md":         {Usage: "!md <buffer> [source]", Desc: "render markdown from source buffer", Params: []paramInfo{{"<buffer>", "destination"}, {"[source]", "source buffer"}}},
 	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
 	"!flow":       {Usage: "!flow <buf1> [buf2 ... buf10]", Desc: "chain prompts using buffers", Params: []paramInfo{{"<buf>", "buffer name"}}},
@@ -311,7 +313,8 @@ var commands = map[string]commandInfo{
 	"!rand":       {Usage: "!rand <min> <max> <buffer>", Desc: "store random number", Params: []paramInfo{{"<min>", "min int"}, {"<max>", "max int"}, {"<buffer>", "buffer name"}}},
 	"!ascii":      {Usage: "!ascii <buffer>", Desc: "gothic ascii art of first 5 words", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!nc":         {Usage: "!nc <buffer> <args>", Desc: "pipe buffer to netcat", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<args>", "nc arguments"}}},
-	"!curl":       {Usage: "!curl <url> [buffer]", Desc: "HTTP GET and store body", Params: []paramInfo{{"<url>", "target URL"}, {"[buffer]", "optional buffer"}}},
+	"!curl":       {Usage: "!curl <url> [buffer] [headers]", Desc: "HTTP GET and store body", Params: []paramInfo{{"<url>", "target URL"}, {"[buffer]", "optional buffer"}, {"[headers]", "buffer with JSON headers"}}},
+	"!diff":       {Usage: "!diff <left> <right> [buffer]", Desc: "diff two buffers or files", Params: []paramInfo{{"<left>", "buffer or file"}, {"<right>", "buffer or file"}, {"[buffer]", "optional output"}}},
 	"!eat":        {Usage: "!eat <buffer> <pane>", Desc: "capture full scrollback", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane id"}}},
 	"!view":       {Usage: "!view <buffer>", Desc: "show buffer in $VIEWER", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rm":         {Usage: "!rm <buffer>", Desc: "remove a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
@@ -364,6 +367,16 @@ func lastCodeBlock(text string) string {
 	return matches[len(matches)-1][2]
 }
 
+// sanitize removes ASCII control characters from a string.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // isPaneID reports whether the buffer name refers to a tmux pane.
 func isPaneID(name string) bool {
 	if strings.HasPrefix(name, "%") {
@@ -375,6 +388,9 @@ func isPaneID(name string) bool {
 
 // readBuffer returns the contents of a buffer or pane capture.
 func readBuffer(name string) (string, bool) {
+	if name == "%null" {
+		return "", true
+	}
 	if val, ok := buffers[name]; ok {
 		return val, true
 	}
@@ -389,6 +405,9 @@ func readBuffer(name string) (string, bool) {
 
 // writeBuffer stores data in a buffer or sends it to a pane if the name refers to one.
 func writeBuffer(name, data string) {
+	if name == "%null" {
+		return
+	}
 	if isPaneID(name) {
 		tmux.SendKeys(name, data)
 		return
@@ -449,7 +468,7 @@ func writePath(path string, data []byte) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-var requiredBins = []string{"tmux", "vim", "batcat", "bash", "nc"}
+var requiredBins = []string{"tmux", "vim", "batcat", "bash", "nc", "git", "cdiff"}
 
 func checkDeps() error {
 	for _, b := range requiredBins {
@@ -734,7 +753,7 @@ func Run() error {
 	loadConfig()
 	// load session before starting readline
 	history = []string{}
-	buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": ""}
+	buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": "", "%null": ""}
 	if sessionFile != "" {
 		if b, err := os.ReadFile(sessionFile); err == nil {
 			var s session
@@ -755,13 +774,16 @@ func Run() error {
 			history = s.History
 			buffers = s.Buffers
 			if buffers == nil {
-				buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": ""}
+				buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": "", "%null": ""}
 			}
 			if _, ok := buffers["%@"]; !ok {
 				buffers["%@"] = ""
 			}
 			if _, ok := buffers["%session"]; !ok {
 				buffers["%session"] = ""
+			}
+			if _, ok := buffers["%null"]; !ok {
+				buffers["%null"] = ""
 			}
 			if s.Prompt != "" {
 				askPrefix = s.Prompt
@@ -1001,6 +1023,9 @@ func saveSession() {
 
 func handleCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
+	for i := range fields {
+		fields[i] = sanitize(fields[i])
+	}
 	loadSessionFromBuffer()
 	var capBuf bytes.Buffer
 	capture := true
@@ -1105,10 +1130,14 @@ func handleCommand(cmd string) bool {
 			usage("!edit")
 			return false
 		}
-		data, ok := buffers[fields[1]]
-		if !ok {
-			cmdPrintln("unknown buffer")
-			return false
+		var data string
+		if fields[1] != "%null" {
+			var ok bool
+			data, ok = buffers[fields[1]]
+			if !ok {
+				cmdPrintln("unknown buffer")
+				return false
+			}
 		}
 		tmp, err := os.CreateTemp("", "grimux-edit-*.tmp")
 		if err != nil {
@@ -1132,7 +1161,9 @@ func handleCommand(cmd string) bool {
 			cmdPrintln("vim error: " + err.Error())
 		}
 		if b, err := os.ReadFile(tmp.Name()); err == nil {
-			buffers[fields[1]] = string(b)
+			if fields[1] != "%null" {
+				buffers[fields[1]] = string(b)
+			}
 		}
 		os.Remove(tmp.Name())
 		forceEnter()
@@ -1265,7 +1296,7 @@ func handleCommand(cmd string) bool {
 	case "!reset":
 		askPrefix = defaultAskPrefix
 		history = []string{}
-		buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": ""}
+		buffers = map[string]string{"%file": "", "%code": "", "%@": "", "%session": "", "%null": ""}
 		sessionFile = ""
 		sessionName = ""
 		sessionPass = ""
@@ -1293,6 +1324,40 @@ func handleCommand(cmd string) bool {
 		if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 			buffers["%session"] = string(b)
 		}
+	case "!recap":
+		client, err := openai.NewClient()
+		if err != nil {
+			cmdPrintln(err.Error())
+			return false
+		}
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "Session History:\n%s\n", strings.Join(history, "\n"))
+		fmt.Fprintln(&buf, "Buffers:")
+		for name, val := range buffers {
+			if name == "%null" {
+				continue
+			}
+			truncated := val
+			if len(truncated) > 200 {
+				truncated = truncated[:200] + "..."
+			}
+			fmt.Fprintf(&buf, "%s:\n%s\n", name, truncated)
+		}
+		promptText := "Provide a concise markdown recap of this Grimux session:\n" + buf.String()
+		stop := spinner()
+		reply, err := client.SendPrompt(promptText)
+		stop()
+		if err != nil {
+			cprintln("openai error: " + err.Error())
+			return false
+		}
+		renderMarkdown(reply)
+		buffers["%@"] = reply
+		if auditMode {
+			auditLog = append(auditLog, reply)
+			maybeSummarizeAudit()
+		}
+		forceEnter()
 	case "!md":
 		if len(fields) < 2 {
 			usage("!md")
@@ -1544,12 +1609,36 @@ func handleCommand(cmd string) bool {
 			usage("!curl")
 			return false
 		}
-		url := fields[1]
+		url := sanitize(fields[1])
 		outBuf := "%@"
+		headerBuf := ""
 		if len(fields) >= 3 {
-			outBuf = fields[2]
+			outBuf = sanitize(fields[2])
 		}
-		resp, err := http.Get(url)
+		if len(fields) >= 4 {
+			headerBuf = sanitize(fields[3])
+		}
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			cmdPrintln("curl error: " + err.Error())
+			return false
+		}
+		if headerBuf != "" {
+			hdrData, ok := readBuffer(headerBuf)
+			if !ok {
+				cmdPrintln("unknown buffer")
+				return false
+			}
+			var hdrs map[string]string
+			if err := json.Unmarshal([]byte(hdrData), &hdrs); err != nil {
+				cmdPrintln("header parse error: " + err.Error())
+				return false
+			}
+			for k, v := range hdrs {
+				req.Header.Set(k, v)
+			}
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			cmdPrintln("curl error: " + err.Error())
 			return false
@@ -1563,6 +1652,103 @@ func handleCommand(cmd string) bool {
 			code := strconv.Itoa(resp.StatusCode)
 			writeBuffer(outBuf, code)
 			cmdPrintln(code)
+		}
+		forceEnter()
+	case "!diff":
+		if len(fields) < 3 {
+			usage("!diff")
+			return false
+		}
+		left := sanitize(fields[1])
+		right := sanitize(fields[2])
+		outBuf := "%@"
+		if len(fields) >= 4 {
+			outBuf = sanitize(fields[3])
+		}
+		var temps []string
+		getPath := func(arg string) (string, error) {
+			if strings.HasPrefix(arg, "%") {
+				data, ok := readBuffer(arg)
+				if !ok {
+					return "", fmt.Errorf("unknown buffer")
+				}
+				f, err := os.CreateTemp("", "grimux-diff")
+				if err != nil {
+					return "", err
+				}
+				if _, err := f.WriteString(data); err != nil {
+					f.Close()
+					return "", err
+				}
+				f.Close()
+				temps = append(temps, f.Name())
+				return f.Name(), nil
+			}
+			return arg, nil
+		}
+		lpath, err := getPath(left)
+		if err != nil {
+			cmdPrintln(err.Error())
+			return false
+		}
+		rpath, err := getPath(right)
+		if err != nil {
+			cmdPrintln(err.Error())
+			return false
+		}
+		defer func() {
+			for _, t := range temps {
+				os.Remove(t)
+			}
+		}()
+		dcmd := exec.Command("git", "diff", "--no-index", "--color", lpath, rpath)
+		var diffOut bytes.Buffer
+		dcmd.Stdout = &diffOut
+		dcmd.Stderr = &diffOut
+		if err := dcmd.Run(); err != nil {
+			if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() > 1 {
+				cmdPrintln("diff error: " + err.Error())
+				return false
+			}
+		}
+		useViewer := false
+		var colored []byte
+		if _, err := exec.LookPath("cdiff"); err == nil {
+			ccmd := exec.Command("cdiff")
+			ccmd.Stdin = &diffOut
+			colored, err = ccmd.CombinedOutput()
+			if err != nil {
+				useViewer = true
+				colored = diffOut.Bytes()
+			}
+		} else if _, err := exec.LookPath("python3"); err == nil {
+			ccmd := exec.Command("python3", "-m", "cdiff")
+			ccmd.Stdin = &diffOut
+			colored, err = ccmd.CombinedOutput()
+			if err != nil {
+				useViewer = true
+				colored = diffOut.Bytes()
+			}
+		} else {
+			useViewer = true
+			colored = diffOut.Bytes()
+		}
+		result := string(colored)
+		writeBuffer(outBuf, result)
+		if useViewer {
+			viewer := os.Getenv("VIEWER")
+			if viewer == "" {
+				viewer = "batcat"
+			}
+			cmdv := exec.Command(viewer, "-l", "diff")
+			cmdv.Stdin = strings.NewReader(result)
+			cmdv.Stdout = os.Stdout
+			cmdv.Stderr = os.Stderr
+			viewerRunning = true
+			cmdv.Run()
+			viewerRunning = false
+		} else {
+			cmdPrintln(result)
 		}
 		forceEnter()
 	case "!eat":
