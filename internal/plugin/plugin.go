@@ -30,19 +30,21 @@ type Plugin struct {
 	path   string
 	L      *lua.LState
 	init   *lua.LFunction
+	run    *lua.LFunction
 	shut   *lua.LFunction
 	hooks  map[string][]*lua.LFunction
 }
 
 // Manager keeps track of loaded plugins and the directory to load from.
 type Manager struct {
-	plugins map[string]*Plugin
-	dir     string
-	mute    map[string]bool
-	printFn func(*Plugin, string)
+	plugins  map[string]*Plugin
+	dir      string
+	mute     map[string]bool
+	printFn  func(*Plugin, string)
+	commands map[string]*Plugin
 }
 
-var mgr = &Manager{plugins: map[string]*Plugin{}, mute: map[string]bool{}}
+var mgr = &Manager{plugins: map[string]*Plugin{}, mute: map[string]bool{}, commands: map[string]*Plugin{}}
 
 var readBufFn func(string) (string, bool)
 var writeBufFn func(string, string)
@@ -244,6 +246,20 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			L.Push(lua.LString(p.Handle))
 			return 1
 		},
+		"command": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			cmd := L.CheckString(2)
+			if err := m.RegisterCommand(p, cmd); err != nil {
+				L.RaiseError("command: %v", err)
+				return 0
+			}
+			L.Push(lua.LString(p.Handle))
+			return 1
+		},
 		"http": func(L *lua.LState) int {
 			handle := L.CheckString(1)
 			if handle != p.Handle {
@@ -350,6 +366,9 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			return nil, err
 		}
 	}
+	if fn, ok := L.GetGlobal("run").(*lua.LFunction); ok {
+		p.run = fn
+	}
 	if p.Info.Name == "" {
 		L.Close()
 		return nil, fmt.Errorf("plugin missing register call")
@@ -369,6 +388,11 @@ func (m *Manager) Unload(name string) error {
 	}
 	if p.shut != nil {
 		_ = p.L.CallByParam(lua.P{Fn: p.shut, NRet: 0, Protect: true}, lua.LString(p.Handle))
+	}
+	for cmd, pl := range m.commands {
+		if pl == p {
+			delete(m.commands, cmd)
+		}
 	}
 	p.L.Close()
 	delete(m.plugins, name)
@@ -423,6 +447,41 @@ func (m *Manager) RunHook(name, buf string, data string) string {
 		}
 	}
 	return out
+}
+
+// RegisterCommand registers a new REPL command for the plugin.
+func (m *Manager) RegisterCommand(p *Plugin, name string) error {
+	if p.Info.Name == "" {
+		return fmt.Errorf("plugin not registered")
+	}
+	cmd := p.Info.Name + "." + name
+	if _, ok := m.commands[cmd]; ok {
+		return fmt.Errorf("command exists")
+	}
+	m.commands[cmd] = p
+	return nil
+}
+
+// IsCommand checks whether the name corresponds to a plugin command.
+func (m *Manager) IsCommand(name string) bool {
+	_, ok := m.commands[name]
+	return ok
+}
+
+// RunCommand invokes the plugin run function for the command.
+func (m *Manager) RunCommand(name string, args []string) error {
+	p, ok := m.commands[name]
+	if !ok {
+		return fmt.Errorf("command not found")
+	}
+	if p.run == nil {
+		return fmt.Errorf("plugin has no run function")
+	}
+	vals := []lua.LValue{lua.LString(p.Handle)}
+	for _, a := range args {
+		vals = append(vals, lua.LString(a))
+	}
+	return p.L.CallByParam(lua.P{Fn: p.run, NRet: 0, Protect: true}, vals...)
 }
 
 func toLValue(L *lua.LState, v interface{}) lua.LValue {

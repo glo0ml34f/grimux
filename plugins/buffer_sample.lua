@@ -2,6 +2,7 @@ function init(handle)
   local info = {name="buffer_sample", grimux="0.1.0", version="0.1.0"}
   local json = plugin.format(handle, '{"name":"%s","grimux":"%s","version":"%s"}', info.name, info.grimux, info.version)
   plugin.register(handle, json)
+  plugin.command(handle, "run")
   plugin.print(handle, "buffer sample loaded")
 end
 

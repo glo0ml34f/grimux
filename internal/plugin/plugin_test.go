@@ -98,3 +98,44 @@ end
 		t.Fatalf("prompt buffer=%s", val)
 	}
 }
+
+func TestCommandRun(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  local info = {name="plug", grimux="0.1.0", version="0.1.0"}
+  local json = '{"name":"plug","grimux":"0.1.0","version":"0.1.0"}'
+  plugin.register(h, json)
+  plugin.command(h, "doit")
+end
+
+function run(h, a, b)
+  if b == nil then
+    last = a
+  else
+    last = a .. "+" .. b
+  end
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+
+	SetPrintHandler(func(*Plugin, string) {})
+	p, err := GetManager().Load(luaFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	defer GetManager().Unload(p.Info.Name)
+
+	if !GetManager().IsCommand("plug.doit") {
+		t.Fatalf("command not registered")
+	}
+	if err := GetManager().RunCommand("plug.doit", []string{"a", "b"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if v := p.L.GetGlobal("last"); v.String() != "a+b" {
+		t.Fatalf("last=%v", v)
+	}
+}

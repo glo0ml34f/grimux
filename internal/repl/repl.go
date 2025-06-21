@@ -1052,6 +1052,15 @@ func handleCommand(cmd string) bool {
 			cmdPrintln("usage: " + info.Usage + " - " + info.Desc)
 		}
 	}
+	if strings.HasPrefix(fields[0], "!") {
+		cmdName := strings.TrimPrefix(fields[0], "!")
+		if plugin.GetManager().IsCommand(cmdName) {
+			if err := plugin.GetManager().RunCommand(cmdName, fields[1:]); err != nil {
+				cmdPrintln("plugin: " + err.Error())
+			}
+			return false
+		}
+	}
 	switch fields[0] {
 	case "!quit":
 		saveSession()
