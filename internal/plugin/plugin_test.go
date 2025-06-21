@@ -141,3 +141,62 @@ end
 		t.Fatalf("last=%v", v)
 	}
 }
+func TestHookPrintInfo(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  local info = {name="phook", grimux="0.1.0", version="0.1.0"}
+  local json = '{"name":"phook","grimux":"0.1.0","version":"0.1.0"}'
+  plugin.register(h, json)
+  plugin.hook(h, "before_write", function(b,v) return v end)
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+
+	var msgs []string
+	SetPrintHandler(func(_ *Plugin, msg string) { msgs = append(msgs, msg) })
+	if _, err := GetManager().Load(luaFile); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(msgs) == 0 || msgs[0] != "hook registered: before_write" {
+		t.Fatalf("hook message=%v", msgs)
+	}
+	GetManager().Shutdown()
+}
+
+func TestBeforeWriteHook(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  local info = {name="pre", grimux="0.1.0", version="0.1.0"}
+  local json = '{"name":"pre","grimux":"0.1.0","version":"0.1.0"}'
+  plugin.register(h, json)
+end
+
+function run(h)
+  plugin.hook(h, "before_write", function(b,v) return v.."-x" end)
+  plugin.write(h, "foo", "bar")
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+	buf := map[string]string{}
+	SetPrintHandler(func(*Plugin, string) {})
+	SetWriteBufferFunc(func(n, v string) { buf[n] = v })
+	p, err := GetManager().Load(luaFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	defer GetManager().Unload(p.Info.Name)
+	if err := p.L.CallByParam(lua.P{Fn: p.L.GetGlobal("run"), NRet: 0, Protect: true}, lua.LString(p.Handle)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if buf["%pre_foo"] != "bar-x" {
+		t.Fatalf("buffer=%s", buf["%pre_foo"])
+	}
+}

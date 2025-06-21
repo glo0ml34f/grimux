@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/glo0ml34f/grimux/internal/input"
+	"github.com/glo0ml34f/grimux/internal/plugin"
 )
 
 const defaultAPIURL = "https://api.openai.com/v1/chat/completions"
@@ -105,6 +106,7 @@ type chatResponse struct {
 
 // SendPrompt sends the given text as a user message and returns the assistant's reply.
 func (c *Client) SendPrompt(prompt string) (string, error) {
+	prompt = plugin.GetManager().RunHook("before_openai", "", prompt)
 	reqBody := chatRequest{
 		Model:    ModelName,
 		Messages: []chatMessage{{Role: "user", Content: prompt}},
@@ -138,5 +140,7 @@ func (c *Client) SendPrompt(prompt string) (string, error) {
 	if len(cr.Choices) == 0 {
 		return "", fmt.Errorf("openai: no choices in response")
 	}
-	return cr.Choices[0].Message.Content, nil
+	reply := cr.Choices[0].Message.Content
+	reply = plugin.GetManager().RunHook("after_openai", "", reply)
+	return reply, nil
 }

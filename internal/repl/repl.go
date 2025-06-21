@@ -229,6 +229,7 @@ func flushPluginMsgs() {
 var respSep = strings.Repeat("─", 40)
 
 func renderMarkdown(md string) {
+	md = plugin.GetManager().RunHook("before_markdown", "", md)
 	out, err := glamour.Render(md, "dark")
 	if err != nil {
 		captureOut(md, true)
@@ -437,6 +438,7 @@ func writeBuffer(name, data string) {
 		tmux.SendKeys(name, data)
 		return
 	}
+	data = plugin.GetManager().RunHook("before_write", name, data)
 	buffers[name] = data
 }
 
@@ -1063,6 +1065,7 @@ func saveSession() {
 }
 
 func handleCommand(cmd string) bool {
+	cmd = plugin.GetManager().RunHook("before_command", "", cmd)
 	fields := strings.Fields(cmd)
 	for i := range fields {
 		fields[i] = sanitize(fields[i])
