@@ -61,7 +61,9 @@ end
 
 function run(h)
   plugin.write(h, "foo", "bar")
-  plugin.hook(h, "after_read", function(buf, val) return val .. "-mod" end)
+  local fn = function(buf, val) return val .. "-mod" end
+  plugin.hook(h, "after_read", fn)
+  plugin.hook(h, "after_read", fn)
   local val = plugin.read(h, "foo")
   plugin.prompt(h, "ask", "? ")
   return val

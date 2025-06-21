@@ -49,6 +49,8 @@ var mgr = &Manager{plugins: map[string]*Plugin{}, mute: map[string]bool{}, comma
 var readBufFn func(string) (string, bool)
 var writeBufFn func(string, string)
 var promptFn func(string) (string, error)
+var addCmdFn func(string)
+var delCmdFn func(string)
 
 // GetManager returns the global plugin manager.
 func GetManager() *Manager { return mgr }
@@ -64,6 +66,12 @@ func SetWriteBufferFunc(fn func(string, string)) { writeBufFn = fn }
 
 // SetPromptFunc registers the function used to prompt the user for input.
 func SetPromptFunc(fn func(string) (string, error)) { promptFn = fn }
+
+// SetCommandAddFunc registers a function called when a plugin adds a command.
+func SetCommandAddFunc(fn func(string)) { addCmdFn = fn }
+
+// SetCommandRemoveFunc registers a function called when a plugin command is removed.
+func SetCommandRemoveFunc(fn func(string)) { delCmdFn = fn }
 
 // Dir returns the configured plugin directory.
 func (m *Manager) Dir() string { return m.dir }
@@ -242,7 +250,16 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			if p.hooks == nil {
 				p.hooks = map[string][]*lua.LFunction{}
 			}
-			p.hooks[hookName] = append(p.hooks[hookName], cb)
+			exists := false
+			for _, f := range p.hooks[hookName] {
+				if f == cb {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				p.hooks[hookName] = append(p.hooks[hookName], cb)
+			}
 			L.Push(lua.LString(p.Handle))
 			return 1
 		},
@@ -392,6 +409,9 @@ func (m *Manager) Unload(name string) error {
 	for cmd, pl := range m.commands {
 		if pl == p {
 			delete(m.commands, cmd)
+			if delCmdFn != nil {
+				delCmdFn(cmd)
+			}
 		}
 	}
 	p.L.Close()
@@ -459,6 +479,9 @@ func (m *Manager) RegisterCommand(p *Plugin, name string) error {
 		return fmt.Errorf("command exists")
 	}
 	m.commands[cmd] = p
+	if addCmdFn != nil {
+		addCmdFn(cmd)
+	}
 	return nil
 }
 

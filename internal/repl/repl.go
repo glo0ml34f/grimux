@@ -198,6 +198,7 @@ func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(succes
 func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, s)) }
 func pluginPrintln(name, s string) {
 	captureOut(s, true)
+	fmt.Println()
 	fmt.Println(colorize(pluginColor, fmt.Sprintf("[plugin:%s] %s", name, s)))
 }
 func ok() string { return colorize(successColor, "✅") }
@@ -324,6 +325,28 @@ var commands = map[string]commandInfo{
 	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 	"!helpme":     {Usage: "!helpme <question>", Desc: "ask the AI for help using grimux"},
+}
+
+var pluginCommandOrder []string
+
+func addPluginCommand(name string) {
+	key := "!" + name
+	if _, ok := commands[key]; ok {
+		return
+	}
+	commands[key] = commandInfo{Usage: key, Desc: "plugin provided command"}
+	pluginCommandOrder = append(pluginCommandOrder, key)
+}
+
+func removePluginCommand(name string) {
+	key := "!" + name
+	delete(commands, key)
+	for i, c := range pluginCommandOrder {
+		if c == key {
+			pluginCommandOrder = append(pluginCommandOrder[:i], pluginCommandOrder[i+1:]...)
+			break
+		}
+	}
 }
 
 func replacePaneRefs(text string) string {
@@ -816,7 +839,20 @@ func Run() error {
 	})
 	plugin.SetReadBufferFunc(func(name string) (string, bool) { return readBuffer(name) })
 	plugin.SetWriteBufferFunc(func(name, data string) { writeBuffer(name, data) })
-	plugin.SetPromptFunc(func(msg string) (string, error) { return input.ReadLinePrompt(msg) })
+	plugin.SetPromptFunc(func(msg string) (string, error) {
+		rl := input.GetReadline()
+		if rl != nil {
+			fmt.Fprintln(rl.Stdout())
+			input.SetReadline(nil)
+			defer input.SetReadline(rl)
+		} else {
+			fmt.Println()
+		}
+		fmt.Fprint(os.Stdout, msg)
+		return input.ReadLine()
+	})
+	plugin.SetCommandAddFunc(addPluginCommand)
+	plugin.SetCommandRemoveFunc(removePluginCommand)
 	if err := plugin.GetManager().LoadAll(); err != nil {
 		cprintln("plugin load error: " + err.Error())
 	}
@@ -1893,6 +1929,13 @@ func handleCommand(cmd string) bool {
 		for _, name := range commandOrder {
 			info := commands[name]
 			cmdPrintln(info.Usage + " - " + info.Desc)
+		}
+		if len(pluginCommandOrder) > 0 {
+			cmdPrintln("plugin commands:")
+			for _, name := range pluginCommandOrder {
+				info := commands[name]
+				cmdPrintln(info.Usage + " - " + info.Desc)
+			}
 		}
 	case "!helpme":
 		if len(fields) < 2 {
