@@ -392,11 +392,13 @@ func readBuffer(name string) (string, bool) {
 		return "", true
 	}
 	if val, ok := buffers[name]; ok {
+		val = plugin.GetManager().RunHook("after_read", name, val)
 		return val, true
 	}
 	if isPaneID(name) {
 		out, err := capturePane(name)
 		if err == nil {
+			out = plugin.GetManager().RunHook("after_read", name, out)
 			return out, true
 		}
 	}
@@ -812,6 +814,9 @@ func Run() error {
 	plugin.SetPrintHandler(func(p *plugin.Plugin, msg string) {
 		pluginMsgCh <- pluginMsg{name: p.Info.Name, text: msg}
 	})
+	plugin.SetReadBufferFunc(func(name string) (string, bool) { return readBuffer(name) })
+	plugin.SetWriteBufferFunc(func(name, data string) { writeBuffer(name, data) })
+	plugin.SetPromptFunc(func(msg string) (string, error) { return input.ReadLinePrompt(msg) })
 	if err := plugin.GetManager().LoadAll(); err != nil {
 		cprintln("plugin load error: " + err.Error())
 	}

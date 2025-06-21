@@ -31,6 +31,7 @@ type Plugin struct {
 	L      *lua.LState
 	init   *lua.LFunction
 	shut   *lua.LFunction
+	hooks  map[string][]*lua.LFunction
 }
 
 // Manager keeps track of loaded plugins and the directory to load from.
@@ -43,11 +44,24 @@ type Manager struct {
 
 var mgr = &Manager{plugins: map[string]*Plugin{}, mute: map[string]bool{}}
 
+var readBufFn func(string) (string, bool)
+var writeBufFn func(string, string)
+var promptFn func(string) (string, error)
+
 // GetManager returns the global plugin manager.
 func GetManager() *Manager { return mgr }
 
 // SetPrintHandler sets the function used to display plugin output.
 func SetPrintHandler(fn func(*Plugin, string)) { mgr.printFn = fn }
+
+// SetReadBufferFunc registers the function used to read buffer contents.
+func SetReadBufferFunc(fn func(string) (string, bool)) { readBufFn = fn }
+
+// SetWriteBufferFunc registers the function used to write buffer contents.
+func SetWriteBufferFunc(fn func(string, string)) { writeBufFn = fn }
+
+// SetPromptFunc registers the function used to prompt the user for input.
+func SetPromptFunc(fn func(string) (string, error)) { promptFn = fn }
 
 // Dir returns the configured plugin directory.
 func (m *Manager) Dir() string { return m.dir }
@@ -101,7 +115,7 @@ func (m *Manager) LoadAll() error {
 // Load loads a plugin from the given path.
 func (m *Manager) Load(path string) (*Plugin, error) {
 	L := lua.NewState(lua.Options{SkipOpenLibs: true})
-	p := &Plugin{Handle: uuid.NewString(), L: L, path: path}
+	p := &Plugin{Handle: uuid.NewString(), L: L, path: path, hooks: map[string][]*lua.LFunction{}}
 	api := L.NewTable()
 	L.SetGlobal("plugin", api)
 	L.SetFuncs(api, map[string]lua.LGFunction{
@@ -156,6 +170,78 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				}
 			}
 			L.Push(lua.LString(fmt.Sprintf(format, args...)))
+			return 1
+		},
+		"read": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			name := L.CheckString(2)
+			if readBufFn == nil {
+				L.Push(lua.LNil)
+				return 1
+			}
+			val, ok := readBufFn(pluginBufferName(p.Info.Name, name))
+			if ok {
+				val = mgr.RunHook("after_read", pluginBufferName(p.Info.Name, name), val)
+				L.Push(lua.LString(val))
+			} else {
+				L.Push(lua.LNil)
+			}
+			return 1
+		},
+		"write": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			name := L.CheckString(2)
+			data := L.CheckString(3)
+			if writeBufFn != nil {
+				writeBufFn(pluginBufferName(p.Info.Name, name), data)
+			}
+			L.Push(lua.LString(p.Handle))
+			return 1
+		},
+		"prompt": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			name := L.CheckString(2)
+			msg := L.CheckString(3)
+			if promptFn == nil {
+				L.Push(lua.LString(""))
+				return 1
+			}
+			resp, err := promptFn(msg)
+			if err != nil {
+				L.RaiseError("prompt: %v", err)
+				return 0
+			}
+			if writeBufFn != nil {
+				writeBufFn(pluginBufferName(p.Info.Name, name), resp)
+			}
+			L.Push(lua.LString(resp))
+			return 1
+		},
+		"hook": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			hookName := L.CheckString(2)
+			cb := L.CheckFunction(3)
+			if p.hooks == nil {
+				p.hooks = map[string][]*lua.LFunction{}
+			}
+			p.hooks[hookName] = append(p.hooks[hookName], cb)
+			L.Push(lua.LString(p.Handle))
 			return 1
 		},
 		"http": func(L *lua.LState) int {
@@ -320,6 +406,25 @@ func (m *Manager) Shutdown() {
 	}
 }
 
+// RunHook executes the registered callbacks for the given hook name.
+func (m *Manager) RunHook(name, buf string, data string) string {
+	out := data
+	for _, p := range m.plugins {
+		if fns, ok := p.hooks[name]; ok {
+			for _, fn := range fns {
+				if err := p.L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, lua.LString(buf), lua.LString(out)); err == nil {
+					val := p.L.Get(-1)
+					out = val.String()
+					p.L.Pop(1)
+				} else {
+					p.L.Pop(p.L.GetTop())
+				}
+			}
+		}
+	}
+	return out
+}
+
 func toLValue(L *lua.LState, v interface{}) lua.LValue {
 	switch val := v.(type) {
 	case nil:
@@ -345,4 +450,11 @@ func toLValue(L *lua.LState, v interface{}) lua.LValue {
 	default:
 		return lua.LString(fmt.Sprintf("%v", val))
 	}
+}
+
+func pluginBufferName(pluginName, name string) string {
+	if strings.HasPrefix(name, "%") {
+		return name
+	}
+	return "%" + pluginName + "_" + name
 }
