@@ -198,6 +198,7 @@ func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(succes
 func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, s)) }
 func pluginPrintln(name, s string) {
 	captureOut(s, true)
+	fmt.Println()
 	fmt.Println(colorize(pluginColor, fmt.Sprintf("[plugin:%s] %s", name, s)))
 }
 func ok() string { return colorize(successColor, "✅") }
@@ -326,6 +327,28 @@ var commands = map[string]commandInfo{
 	"!helpme":     {Usage: "!helpme <question>", Desc: "ask the AI for help using grimux"},
 }
 
+var pluginCommandOrder []string
+
+func addPluginCommand(name string) {
+	key := "!" + name
+	if _, ok := commands[key]; ok {
+		return
+	}
+	commands[key] = commandInfo{Usage: key, Desc: "plugin provided command"}
+	pluginCommandOrder = append(pluginCommandOrder, key)
+}
+
+func removePluginCommand(name string) {
+	key := "!" + name
+	delete(commands, key)
+	for i, c := range pluginCommandOrder {
+		if c == key {
+			pluginCommandOrder = append(pluginCommandOrder[:i], pluginCommandOrder[i+1:]...)
+			break
+		}
+	}
+}
+
 func replacePaneRefs(text string) string {
 	return panePattern.ReplaceAllStringFunc(text, func(tok string) string {
 		m := panePattern.FindStringSubmatch(tok)
@@ -392,11 +415,13 @@ func readBuffer(name string) (string, bool) {
 		return "", true
 	}
 	if val, ok := buffers[name]; ok {
+		val = plugin.GetManager().RunHook("after_read", name, val)
 		return val, true
 	}
 	if isPaneID(name) {
 		out, err := capturePane(name)
 		if err == nil {
+			out = plugin.GetManager().RunHook("after_read", name, out)
 			return out, true
 		}
 	}
@@ -812,6 +837,22 @@ func Run() error {
 	plugin.SetPrintHandler(func(p *plugin.Plugin, msg string) {
 		pluginMsgCh <- pluginMsg{name: p.Info.Name, text: msg}
 	})
+	plugin.SetReadBufferFunc(func(name string) (string, bool) { return readBuffer(name) })
+	plugin.SetWriteBufferFunc(func(name, data string) { writeBuffer(name, data) })
+	plugin.SetPromptFunc(func(msg string) (string, error) {
+		rl := input.GetReadline()
+		if rl != nil {
+			fmt.Fprintln(rl.Stdout())
+			input.SetReadline(nil)
+			defer input.SetReadline(rl)
+		} else {
+			fmt.Println()
+		}
+		fmt.Fprint(os.Stdout, msg)
+		return input.ReadLine()
+	})
+	plugin.SetCommandAddFunc(addPluginCommand)
+	plugin.SetCommandRemoveFunc(removePluginCommand)
 	if err := plugin.GetManager().LoadAll(); err != nil {
 		cprintln("plugin load error: " + err.Error())
 	}
@@ -1045,6 +1086,15 @@ func handleCommand(cmd string) bool {
 	usage := func(name string) {
 		if info, ok := commands[name]; ok {
 			cmdPrintln("usage: " + info.Usage + " - " + info.Desc)
+		}
+	}
+	if strings.HasPrefix(fields[0], "!") {
+		cmdName := strings.TrimPrefix(fields[0], "!")
+		if plugin.GetManager().IsCommand(cmdName) {
+			if err := plugin.GetManager().RunCommand(cmdName, fields[1:]); err != nil {
+				cmdPrintln("plugin: " + err.Error())
+			}
+			return false
 		}
 	}
 	switch fields[0] {
@@ -1879,6 +1929,13 @@ func handleCommand(cmd string) bool {
 		for _, name := range commandOrder {
 			info := commands[name]
 			cmdPrintln(info.Usage + " - " + info.Desc)
+		}
+		if len(pluginCommandOrder) > 0 {
+			cmdPrintln("plugin commands:")
+			for _, name := range pluginCommandOrder {
+				info := commands[name]
+				cmdPrintln(info.Usage + " - " + info.Desc)
+			}
 		}
 	case "!helpme":
 		if len(fields) < 2 {
