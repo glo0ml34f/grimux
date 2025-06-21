@@ -367,6 +367,16 @@ func lastCodeBlock(text string) string {
 	return matches[len(matches)-1][2]
 }
 
+// sanitize removes ASCII control characters from a string.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // isPaneID reports whether the buffer name refers to a tmux pane.
 func isPaneID(name string) bool {
 	if strings.HasPrefix(name, "%") {
@@ -1013,6 +1023,9 @@ func saveSession() {
 
 func handleCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
+	for i := range fields {
+		fields[i] = sanitize(fields[i])
+	}
 	loadSessionFromBuffer()
 	var capBuf bytes.Buffer
 	capture := true
@@ -1117,10 +1130,14 @@ func handleCommand(cmd string) bool {
 			usage("!edit")
 			return false
 		}
-		data, ok := buffers[fields[1]]
-		if !ok {
-			cmdPrintln("unknown buffer")
-			return false
+		var data string
+		if fields[1] != "%null" {
+			var ok bool
+			data, ok = buffers[fields[1]]
+			if !ok {
+				cmdPrintln("unknown buffer")
+				return false
+			}
 		}
 		tmp, err := os.CreateTemp("", "grimux-edit-*.tmp")
 		if err != nil {
@@ -1144,7 +1161,9 @@ func handleCommand(cmd string) bool {
 			cmdPrintln("vim error: " + err.Error())
 		}
 		if b, err := os.ReadFile(tmp.Name()); err == nil {
-			buffers[fields[1]] = string(b)
+			if fields[1] != "%null" {
+				buffers[fields[1]] = string(b)
+			}
 		}
 		os.Remove(tmp.Name())
 		forceEnter()
@@ -1590,14 +1609,14 @@ func handleCommand(cmd string) bool {
 			usage("!curl")
 			return false
 		}
-		url := fields[1]
+		url := sanitize(fields[1])
 		outBuf := "%@"
 		headerBuf := ""
 		if len(fields) >= 3 {
-			outBuf = fields[2]
+			outBuf = sanitize(fields[2])
 		}
 		if len(fields) >= 4 {
-			headerBuf = fields[3]
+			headerBuf = sanitize(fields[3])
 		}
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -1640,11 +1659,11 @@ func handleCommand(cmd string) bool {
 			usage("!diff")
 			return false
 		}
-		left := fields[1]
-		right := fields[2]
+		left := sanitize(fields[1])
+		right := sanitize(fields[2])
 		outBuf := "%@"
 		if len(fields) >= 4 {
-			outBuf = fields[3]
+			outBuf = sanitize(fields[3])
 		}
 		var temps []string
 		getPath := func(arg string) (string, error) {
@@ -1692,16 +1711,45 @@ func handleCommand(cmd string) bool {
 				return false
 			}
 		}
-		ccmd := exec.Command("cdiff")
-		ccmd.Stdin = &diffOut
-		out, err := ccmd.CombinedOutput()
-		if err != nil {
-			cmdPrintln("cdiff error: " + err.Error())
-			return false
+		useViewer := false
+		var colored []byte
+		if _, err := exec.LookPath("cdiff"); err == nil {
+			ccmd := exec.Command("cdiff")
+			ccmd.Stdin = &diffOut
+			colored, err = ccmd.CombinedOutput()
+			if err != nil {
+				useViewer = true
+				colored = diffOut.Bytes()
+			}
+		} else if _, err := exec.LookPath("python3"); err == nil {
+			ccmd := exec.Command("python3", "-m", "cdiff")
+			ccmd.Stdin = &diffOut
+			colored, err = ccmd.CombinedOutput()
+			if err != nil {
+				useViewer = true
+				colored = diffOut.Bytes()
+			}
+		} else {
+			useViewer = true
+			colored = diffOut.Bytes()
 		}
-		result := string(out)
+		result := string(colored)
 		writeBuffer(outBuf, result)
-		cmdPrintln(result)
+		if useViewer {
+			viewer := os.Getenv("VIEWER")
+			if viewer == "" {
+				viewer = "batcat"
+			}
+			cmdv := exec.Command(viewer, "-l", "diff")
+			cmdv.Stdin = strings.NewReader(result)
+			cmdv.Stdout = os.Stdout
+			cmdv.Stderr = os.Stderr
+			viewerRunning = true
+			cmdv.Run()
+			viewerRunning = false
+		} else {
+			cmdPrintln(result)
+		}
 		forceEnter()
 	case "!eat":
 		if len(fields) < 3 {

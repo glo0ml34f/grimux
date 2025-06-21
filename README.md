@@ -22,6 +22,7 @@ Buffers are scratch spaces like `%file`, `%code` and `%@`. They hold text for
 commands to consume or produce. Panes are addressed by their tmux id (e.g. `%1`).
 `!observe %buf %1` captures pane output into `%buf`; sending text to a pane works
 the same way using its id as a buffer name.
+Use `%null` when you want to discard output entirely.
 
 ## Core workflow
 1. `!ls` shows available panes and buffers
@@ -47,6 +48,7 @@ the same way using its id as a buffer name.
 - `!prefix <buffer|file>` – set prefix from buffer or file
 - `!reset` – reset session and prefix
 - `!unset <buffer>` – clear buffer
+- `%null` – special buffer that discards all writes and always reads empty
 - `!get_prompt` – show current prefix
 - `!session` – store session JSON in `%session`
 - `!run_on <buffer> <pane> <cmd>` – run command using pane capture
@@ -62,7 +64,9 @@ the same way using its id as a buffer name.
 - `!rand <min> <max> <buffer>` – store random number
 - `!ascii <buffer>` – gothic ascii art of first 5 words
 - `!nc <buffer> <args>` – pipe buffer to netcat
-- `!curl <url> [buffer]` – HTTP GET and store body
+- `!curl <url> [buffer] [headers]` – HTTP GET and store body with optional headers
+- `!diff <left> <right> [buffer]` – diff two buffers or files
+- `!recap` – summarize the session
 - `!eat <buffer> <pane>` – capture full scrollback
 - `!view <buffer>` – show buffer in `$VIEWER`
 - `!rm <buffer>` – remove a buffer

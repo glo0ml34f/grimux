@@ -75,6 +75,7 @@ Below is an expanded reference with ideas for how each command might aid your re
 - `!edit <buf>` – open `$EDITOR` to modify text.
 - `!save <buf> <file>` / `!file <path> [buf]` – move between buffers and files.
 - `!unset <buf>` / `!rm <buf>` – clear or remove a buffer when done.
+- `%null` – special buffer that discards writes and always reads empty.
 - `!grep <regex> [buffers...]` – search through your captured data.
 
 ### Running Commands
