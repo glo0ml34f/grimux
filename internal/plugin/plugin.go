@@ -195,7 +195,6 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			}
 			val, ok := readBufFn(pluginBufferName(p.Info.Name, name))
 			if ok {
-				val = mgr.RunHook("after_read", pluginBufferName(p.Info.Name, name), val)
 				L.Push(lua.LString(val))
 			} else {
 				L.Push(lua.LNil)
