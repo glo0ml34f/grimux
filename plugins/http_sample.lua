@@ -1,6 +1,6 @@
 function init(handle)
   local info = {name="http_sample", grimux="0.1.0", version="0.1.0"}
-  local json = string.format('{"name":"%s","grimux":"%s","version":"%s"}', info.name, info.grimux, info.version)
+  local json = plugin.format(handle, '{"name":"%s","grimux":"%s","version":"%s"}', info.name, info.grimux, info.version)
   plugin.register(handle, json)
   plugin.print(handle, "http sample loaded")
 

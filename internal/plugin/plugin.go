@@ -134,6 +134,30 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			L.Push(lua.LString(p.Handle))
 			return 1
 		},
+		"format": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			format := L.CheckString(2)
+			args := make([]interface{}, 0, L.GetTop()-2)
+			for i := 3; i <= L.GetTop(); i++ {
+				val := L.Get(i)
+				switch v := val.(type) {
+				case lua.LBool:
+					args = append(args, bool(v))
+				case lua.LNumber:
+					args = append(args, float64(v))
+				case lua.LString:
+					args = append(args, string(v))
+				default:
+					args = append(args, val.String())
+				}
+			}
+			L.Push(lua.LString(fmt.Sprintf(format, args...)))
+			return 1
+		},
 		"http": func(L *lua.LState) int {
 			handle := L.CheckString(1)
 			if handle != p.Handle {
