@@ -1,8 +1,12 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -130,6 +134,100 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			L.Push(lua.LString(p.Handle))
 			return 1
 		},
+		"http": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			method := strings.ToUpper(L.CheckString(2))
+			rawURL := L.CheckString(3)
+			var opts struct {
+				Headers     map[string]string `json:"headers"`
+				Params      map[string]string `json:"params"`
+				Form        map[string]string `json:"form"`
+				JSON        interface{}       `json:"json"`
+				Body        string            `json:"body"`
+				ContentType string            `json:"content_type"`
+			}
+			if L.GetTop() >= 4 {
+				optStr := L.CheckString(4)
+				if err := json.Unmarshal([]byte(optStr), &opts); err != nil {
+					L.RaiseError("opts parse: %v", err)
+					return 0
+				}
+			}
+			u, err := url.Parse(rawURL)
+			if err != nil {
+				L.RaiseError("bad url: %v", err)
+				return 0
+			}
+			if len(opts.Params) > 0 {
+				q := u.Query()
+				for k, v := range opts.Params {
+					q.Set(k, v)
+				}
+				u.RawQuery = q.Encode()
+			}
+			var body io.Reader
+			if opts.JSON != nil {
+				b, err := json.Marshal(opts.JSON)
+				if err != nil {
+					L.RaiseError("json body: %v", err)
+					return 0
+				}
+				body = bytes.NewReader(b)
+				if opts.ContentType == "" {
+					opts.ContentType = "application/json"
+				}
+			} else if len(opts.Form) > 0 {
+				data := url.Values{}
+				for k, v := range opts.Form {
+					data.Set(k, v)
+				}
+				body = strings.NewReader(data.Encode())
+				if opts.ContentType == "" {
+					opts.ContentType = "application/x-www-form-urlencoded"
+				}
+			} else if opts.Body != "" {
+				body = strings.NewReader(opts.Body)
+			}
+			req, err := http.NewRequest(method, u.String(), body)
+			if err != nil {
+				L.RaiseError("http: %v", err)
+				return 0
+			}
+			if opts.ContentType != "" && body != nil {
+				req.Header.Set("Content-Type", opts.ContentType)
+			}
+			for k, v := range opts.Headers {
+				req.Header.Set(k, v)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				L.RaiseError("http: %v", err)
+				return 0
+			}
+			defer resp.Body.Close()
+			b, err := io.ReadAll(resp.Body)
+			if err != nil {
+				L.RaiseError("read body: %v", err)
+				return 0
+			}
+			ct := resp.Header.Get("Content-Type")
+			if strings.Contains(ct, "application/json") {
+				var val interface{}
+				if err := json.Unmarshal(b, &val); err == nil {
+					L.Push(toLValue(L, val))
+				} else {
+					L.Push(lua.LString(string(b)))
+				}
+			} else {
+				L.Push(lua.LString(string(b)))
+			}
+			L.Push(lua.LNumber(resp.StatusCode))
+			return 2
+		},
 	})
 	if err := L.DoFile(path); err != nil {
 		L.Close()
@@ -195,5 +293,32 @@ func (m *Manager) List() []Info {
 func (m *Manager) Shutdown() {
 	for name := range m.plugins {
 		m.Unload(name)
+	}
+}
+
+func toLValue(L *lua.LState, v interface{}) lua.LValue {
+	switch val := v.(type) {
+	case nil:
+		return lua.LNil
+	case bool:
+		return lua.LBool(val)
+	case float64:
+		return lua.LNumber(val)
+	case string:
+		return lua.LString(val)
+	case []interface{}:
+		tbl := L.NewTable()
+		for i, it := range val {
+			tbl.RawSetInt(i+1, toLValue(L, it))
+		}
+		return tbl
+	case map[string]interface{}:
+		tbl := L.NewTable()
+		for k, it := range val {
+			tbl.RawSetString(k, toLValue(L, it))
+		}
+		return tbl
+	default:
+		return lua.LString(fmt.Sprintf("%v", val))
 	}
 }
