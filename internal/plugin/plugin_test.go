@@ -75,8 +75,17 @@ end
 
 	buf := map[string]string{}
 	SetPrintHandler(func(*Plugin, string) {})
-	SetReadBufferFunc(func(n string) (string, bool) { v, ok := buf[n]; return v, ok })
-	SetWriteBufferFunc(func(n, v string) { buf[n] = v })
+	SetReadBufferFunc(func(n string) (string, bool) {
+		v, ok := buf[n]
+		if ok {
+			v = GetManager().RunHook("after_read", n, v)
+		}
+		return v, ok
+	})
+	SetWriteBufferFunc(func(n, v string) {
+		v = GetManager().RunHook("before_write", n, v)
+		buf[n] = v
+	})
 	SetPromptFunc(func(string) (string, error) { return "typed", nil })
 
 	p, err := GetManager().Load(luaFile)
@@ -187,7 +196,10 @@ end
 	}
 	buf := map[string]string{}
 	SetPrintHandler(func(*Plugin, string) {})
-	SetWriteBufferFunc(func(n, v string) { buf[n] = v })
+	SetWriteBufferFunc(func(n, v string) {
+		v = GetManager().RunHook("before_write", n, v)
+		buf[n] = v
+	})
 	p, err := GetManager().Load(luaFile)
 	if err != nil {
 		t.Fatalf("load: %v", err)

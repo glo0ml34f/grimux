@@ -858,6 +858,9 @@ func Run() error {
 	if err := plugin.GetManager().LoadAll(); err != nil {
 		cprintln("plugin load error: " + err.Error())
 	}
+	if len(plugin.GetManager().List()) > 0 {
+		cprintln("\u26A0\uFE0F  plugins can run arbitrary code. Use only trusted ones.")
+	}
 	flushPluginMsgs()
 
 	oldState, err := startRaw()

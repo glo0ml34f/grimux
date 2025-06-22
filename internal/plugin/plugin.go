@@ -195,7 +195,6 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			}
 			val, ok := readBufFn(pluginBufferName(p.Info.Name, name))
 			if ok {
-				val = m.RunHook("after_read", pluginBufferName(p.Info.Name, name), val)
 				L.Push(lua.LString(val))
 			} else {
 				L.Push(lua.LNil)
@@ -210,7 +209,6 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			}
 			name := L.CheckString(2)
 			data := L.CheckString(3)
-			data = m.RunHook("before_write", pluginBufferName(p.Info.Name, name), data)
 			if writeBufFn != nil {
 				writeBufFn(pluginBufferName(p.Info.Name, name), data)
 			}
