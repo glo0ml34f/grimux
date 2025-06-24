@@ -930,7 +930,12 @@ func Run() error {
 			client.SendPrompt("ping")
 		} else {
 			p := prompts[rand.Intn(len(prompts))]
-			stop := spinner()
+			var stop func()
+			if !plugin.GetManager().HasHook("before_openai") && !plugin.GetManager().HasHook("after_openai") {
+				stop = spinner()
+			} else {
+				stop = func() {}
+			}
 			reply, err := client.SendPrompt(p + "and please keep your response short, pithy, and funny")
 			stop()
 			if err == nil {

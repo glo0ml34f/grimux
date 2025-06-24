@@ -212,3 +212,33 @@ end
 		t.Fatalf("buffer=%s", buf["%pre_foo"])
 	}
 }
+
+func TestHasHook(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  local info = {name="hh", grimux="0.1.0", version="0.1.0"}
+  local json = '{"name":"hh","grimux":"0.1.0","version":"0.1.0"}'
+  plugin.register(h, json)
+  plugin.hook(h, "before_openai", function(b,v) return v end)
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+	SetPrintHandler(func(*Plugin, string) {})
+	p, err := GetManager().Load(luaFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !GetManager().HasHook("before_openai") {
+		t.Fatalf("missing hook")
+	}
+	if err := GetManager().Unload(p.Info.Name); err != nil {
+		t.Fatalf("unload: %v", err)
+	}
+	if GetManager().HasHook("before_openai") {
+		t.Fatalf("hook still registered")
+	}
+}

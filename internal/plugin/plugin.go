@@ -471,6 +471,16 @@ func (m *Manager) RunHook(name, buf string, data string) string {
 	return out
 }
 
+// HasHook reports whether any plugin has registered the given hook name.
+func (m *Manager) HasHook(name string) bool {
+	for _, p := range m.plugins {
+		if len(p.hooks[name]) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // RegisterCommand registers a new REPL command for the plugin.
 func (m *Manager) RegisterCommand(p *Plugin, name string) error {
 	if p.Info.Name == "" {
