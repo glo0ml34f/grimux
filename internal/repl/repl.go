@@ -887,7 +887,6 @@ func Run() error {
 		}
 	}()
 
-	client, err := openai.NewClient()
 	cfg := readline.Config{
 		DisableAutoSaveHistory: true,
 		AutoComplete:           &autoCompleter{},
@@ -903,6 +902,7 @@ func Run() error {
 	for _, h := range history {
 		rl.SaveHistory(h)
 	}
+	client, err := openai.NewClient()
 
 	setPrompt := func() {
 		if sessionName != "" {
