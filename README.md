@@ -61,7 +61,7 @@ Use `%null` when you want to discard output entirely.
 - `%null` – special buffer that discards all writes and always reads empty
 - `!get_prompt` – show current prefix
 - `!session` – store session JSON in `%session`
-- `!run_on <buffer> <pane> <cmd>` – run command using pane capture
+- `!run_on <buffer> <pane> <cmd>` – run a command on another pane and store its output
 - `!flow <buf1> [buf2 ... buf10]` – chain prompts using buffers
 - `!grep <regex> [buffers...]` – search buffers for regex
 - `!model <name>` – set OpenAI model
@@ -73,7 +73,7 @@ Use `%null` when you want to discard output entirely.
 - `!sum <buffer>` – summarize buffer with LLM
 - `!rand <min> <max> <buffer>` – store random number
 - `!ascii <buffer>` – gothic ascii art of first 5 words
-- `!nc <buffer> <args>` – pipe buffer to netcat
+- `!socat <buffer> <args>` – pipe buffer to socat
 - `!curl <url> [buffer] [headers]` – HTTP GET and store body with optional headers
 - `!diff <left> <right> [buffer]` – diff two buffers or files
 - `!recap` – summarize the session

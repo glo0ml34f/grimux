@@ -278,7 +278,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!recap", "!md", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!socat", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme",
 }
 
 var commands = map[string]commandInfo{
@@ -314,7 +314,7 @@ var commands = map[string]commandInfo{
 	"!sum":        {Usage: "!sum <buffer>", Desc: "summarize buffer with LLM", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rand":       {Usage: "!rand <min> <max> <buffer>", Desc: "store random number", Params: []paramInfo{{"<min>", "min int"}, {"<max>", "max int"}, {"<buffer>", "buffer name"}}},
 	"!ascii":      {Usage: "!ascii <buffer>", Desc: "gothic ascii art of first 5 words", Params: []paramInfo{{"<buffer>", "buffer name"}}},
-	"!nc":         {Usage: "!nc <buffer> <args>", Desc: "pipe buffer to netcat", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<args>", "nc arguments"}}},
+	"!socat":      {Usage: "!socat <buffer> <args>", Desc: "pipe buffer to socat", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<args>", "socat arguments"}}},
 	"!curl":       {Usage: "!curl <url> [buffer] [headers]", Desc: "HTTP GET and store body", Params: []paramInfo{{"<url>", "target URL"}, {"[buffer]", "optional buffer"}, {"[headers]", "buffer with JSON headers"}}},
 	"!diff":       {Usage: "!diff <left> <right> [buffer]", Desc: "diff two buffers or files", Params: []paramInfo{{"<left>", "buffer or file"}, {"<right>", "buffer or file"}, {"[buffer]", "optional output"}}},
 	"!eat":        {Usage: "!eat <buffer> <pane>", Desc: "capture full scrollback", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane id"}}},
@@ -855,6 +855,27 @@ func Run() error {
 		}
 		fmt.Fprint(os.Stdout, msg)
 		return input.ReadLine()
+	})
+	plugin.SetGenCommandFunc(func(buf, prompt string) (string, error) {
+		client, err := openai.NewClient()
+		if err != nil {
+			return "", err
+		}
+		stop := spinner()
+		reply, err := client.SendPrompt(prompt)
+		stop()
+		if err == nil {
+			writeBuffer(buf, reply)
+		}
+		return reply, err
+	})
+	plugin.SetSocatCommandFunc(func(buf string, args []string) (string, error) {
+		data, _ := readBuffer(buf)
+		cmd := exec.Command("socat", args...)
+		cmd.Stdin = strings.NewReader(data)
+		out, err := cmd.CombinedOutput()
+		writeBuffer("%@", string(out))
+		return string(out), err
 	})
 	plugin.SetCommandAddFunc(addPluginCommand)
 	plugin.SetCommandRemoveFunc(removePluginCommand)
@@ -1450,6 +1471,9 @@ func handleCommand(cmd string) bool {
 		buffers[dest] = out
 		fmt.Print(colorize(respColor, out))
 		forceEnter()
+	// !run_on sends a command to a different tmux pane, waits briefly and
+	// captures that pane's output back into a buffer. It allows automation
+	// against tools running in other panes.
 	case "!run_on":
 		if len(fields) < 4 {
 			usage("!run_on")
@@ -1654,9 +1678,9 @@ func handleCommand(cmd string) bool {
 		result := string(out)
 		buffers["%@"] = result
 		cmdPrintln(result)
-	case "!nc":
+	case "!socat":
 		if len(fields) < 3 {
-			usage("!nc")
+			usage("!socat")
 			return false
 		}
 		data, ok := buffers[fields[1]]
@@ -1665,11 +1689,11 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		args := fields[2:]
-		cmd := exec.Command("nc", args...)
+		cmd := exec.Command("socat", args...)
 		cmd.Stdin = strings.NewReader(data)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			cmdPrintln("nc error: " + err.Error())
+			cmdPrintln("socat error: " + err.Error())
 		}
 		buffers["%@"] = string(out)
 		cmdPrintln(string(out))

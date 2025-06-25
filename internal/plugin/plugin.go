@@ -51,6 +51,8 @@ var writeBufFn func(string, string)
 var promptFn func(string) (string, error)
 var addCmdFn func(string)
 var delCmdFn func(string)
+var genCmdFn func(string, string) (string, error)
+var socatCmdFn func(string, []string) (string, error)
 
 // GetManager returns the global plugin manager.
 func GetManager() *Manager { return mgr }
@@ -72,6 +74,12 @@ func SetCommandAddFunc(fn func(string)) { addCmdFn = fn }
 
 // SetCommandRemoveFunc registers a function called when a plugin command is removed.
 func SetCommandRemoveFunc(fn func(string)) { delCmdFn = fn }
+
+// SetGenCommandFunc registers the function used by plugin.gen.
+func SetGenCommandFunc(fn func(string, string) (string, error)) { genCmdFn = fn }
+
+// SetSocatCommandFunc registers the function used by plugin.socat.
+func SetSocatCommandFunc(fn func(string, []string) (string, error)) { socatCmdFn = fn }
 
 // Dir returns the configured plugin directory.
 func (m *Manager) Dir() string { return m.dir }
@@ -372,6 +380,52 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			}
 			L.Push(lua.LNumber(resp.StatusCode))
 			return 2
+		},
+		"gen": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			buf := L.CheckString(2)
+			prompt := L.CheckString(3)
+			if genCmdFn == nil {
+				L.Push(lua.LString(""))
+				return 1
+			}
+			reply, err := genCmdFn(pluginBufferName(p.Info.Name, buf), prompt)
+			if err != nil {
+				L.RaiseError("gen: %v", err)
+				return 0
+			}
+			if writeBufFn != nil {
+				writeBufFn(pluginBufferName(p.Info.Name, buf), reply)
+			}
+			L.Push(lua.LString(reply))
+			return 1
+		},
+		"socat": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			buf := L.CheckString(2)
+			args := make([]string, 0, L.GetTop()-2)
+			for i := 3; i <= L.GetTop(); i++ {
+				args = append(args, L.CheckString(i))
+			}
+			if socatCmdFn == nil {
+				L.Push(lua.LString(""))
+				return 1
+			}
+			out, err := socatCmdFn(pluginBufferName(p.Info.Name, buf), args)
+			if err != nil {
+				L.RaiseError("socat: %v", err)
+				return 0
+			}
+			L.Push(lua.LString(out))
+			return 1
 		},
 	})
 	if err := L.DoFile(path); err != nil {
