@@ -1,6 +1,6 @@
 # Grimux Comprehensive Guide
 
-Grimux is a whimsical REPL that lives inside tmux. It helps security researchers explore systems, capture output, manipulate text, and converse with an AI assistant all without leaving the terminal. This guide expands on the README with practical examples, workflows, and a glance at what might come next.
+Grimux is a whimsical REPL that lives inside tmux. It helps security researchers explore systems, capture output, manipulate text, and converse with an AI assistant all without leaving the terminal. This guide expands on the README with practical examples, workflows, and a glance at what might come next. Newer versions add commands such as `!socat` for network shenanigans and `!run_on` for orchestrating other panes, while plugins can hook into the AI via `plugin.gen`.
 
 ## Why Grimux?
 
@@ -81,8 +81,8 @@ Below is an expanded reference with ideas for how each command might aid your re
 ### Running Commands
 
 - `!run [buf] <cmd>` – execute a shell command, optionally piping in a buffer. Use this to compile code or run enumeration scripts.
-- `!run_on <buf> <pane> <cmd>` – capture a pane, run a command with that capture as input, store output in `<buf>`.
-- `!nc <buf> <args>` – pipe a buffer to netcat. Convenient for sending crafted payloads.
+- `!run_on <buf> <pane> <cmd>` – run a command on another pane and capture its output into `<buf>`.
+- `!socat <buf> <args>` – pipe a buffer to socat. Convenient for sending crafted payloads or bridging protocols.
 - `!curl <url> [buf] [hdrs]` – fetch a URL into a buffer, optionally using headers from `hdrs`.
 - `!diff <a> <b> [buf]` – show a colorized diff between buffers or files.
 - `!recap` – summarize the session.

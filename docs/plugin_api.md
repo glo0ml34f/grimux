@@ -32,6 +32,8 @@ end
 | `plugin.hook(handle, name, fn(buf, val))` | Register a hook callback. Hooks include `before_write`, `after_read`, `before_command`, `before_markdown`, `before_openai` and `after_openai`. |
 | `plugin.command(handle, name)` | Register a plugin command. Invoking `<plugin>.<name>` will call `run`. |
 | `plugin.http(handle, method, url [, opts])` | Perform an HTTP request. `opts` is a JSON object supporting `headers`, `params`, `form`, `json`, `body` and `content_type`. Returns the response body (parsed as a Lua table if JSON) and status code. |
+| `plugin.gen(handle, buffer, prompt)` | Invoke the `!gen` command using Grimux's OpenAI config. The response is written to `buffer`. |
+| `plugin.socat(handle, buffer, args)` | Run the `!socat` command with `args` to send `buffer` contents through socat. Returns command output. |
 
 Buffers written via `plugin.write` are namespaced as `%<plugin>_<buffer>` to avoid clashing with user buffers. Use leading `%` to access a global buffer directly.
 

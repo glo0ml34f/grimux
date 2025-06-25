@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	lua "github.com/yuin/gopher-lua"
@@ -267,5 +269,85 @@ end
 	defer GetManager().Unload(p.Info.Name)
 	if len(p.hooks) != 20 {
 		t.Fatalf("hook count=%d", len(p.hooks))
+	}
+}
+
+func TestPluginGen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices": [{"message": {"content": "ok"}}]}`)
+	}))
+	defer srv.Close()
+	_ = os.Setenv("OPENAI_API_URL", srv.URL)
+	_ = os.Setenv("OPENAI_API_KEY", "x")
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  plugin.register(h, '{"name":"aiplug","grimux":"0.1.0","version":"0.1.0"}')
+end
+function run(h)
+  plugin.gen(h, "out", "hi")
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+	storage := map[string]string{}
+	SetPrintHandler(func(*Plugin, string) {})
+	SetGenCommandFunc(func(b, prompt string) (string, error) {
+		storage[b] = "ok"
+		return "ok", nil
+	})
+	SetReadBufferFunc(func(n string) (string, bool) { v, ok := storage[n]; return v, ok })
+	SetWriteBufferFunc(func(n, v string) { storage[n] = v })
+	p, err := GetManager().Load(luaFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	defer GetManager().Unload(p.Info.Name)
+	if err := p.L.CallByParam(lua.P{Fn: p.L.GetGlobal("run"), NRet: 0, Protect: true}, lua.LString(p.Handle)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if storage["%aiplug_out"] != "ok" {
+		t.Fatalf("got=%s", storage["%aiplug_out"])
+	}
+}
+
+func TestPluginSocat(t *testing.T) {
+	if _, err := exec.LookPath("socat"); err != nil {
+		t.Skip("socat not installed")
+	}
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  plugin.register(h, '{"name":"soc","grimux":"0.1.0","version":"0.1.0"}')
+end
+function run(h)
+  plugin.write(h, "in", "hello")
+  out = plugin.socat(h, "in", "-u", "-", "-")
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+	buf := map[string]string{}
+	SetPrintHandler(func(*Plugin, string) {})
+	SetSocatCommandFunc(func(b string, args []string) (string, error) {
+		return buf[b], nil
+	})
+	SetReadBufferFunc(func(n string) (string, bool) { v, ok := buf[n]; return v, ok })
+	SetWriteBufferFunc(func(n, v string) { buf[n] = v })
+	p, err := GetManager().Load(luaFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	defer GetManager().Unload(p.Info.Name)
+	if err := p.L.CallByParam(lua.P{Fn: p.L.GetGlobal("run"), NRet: 0, Protect: true}, lua.LString(p.Handle)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out := p.L.GetGlobal("out").String(); strings.TrimSpace(out) != "hello" {
+		t.Fatalf("out=%q", out)
 	}
 }
