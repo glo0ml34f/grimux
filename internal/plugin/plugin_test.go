@@ -88,7 +88,7 @@ end
 		v = GetManager().RunHook("before_write", n, v)
 		buf[n] = v
 	})
-	SetPromptFunc(func(string) (string, error) { return "typed", nil })
+	SetPromptFunc(func(string) (string, error) { return "y", nil })
 
 	p, err := GetManager().Load(luaFile)
 	if err != nil {
@@ -107,7 +107,7 @@ end
 	if val := buf["%plug_foo"]; val != "bar" {
 		t.Fatalf("buffer foo=%s", val)
 	}
-	if val := buf["%plug_ask"]; val != "typed" {
+	if val := buf["%plug_ask"]; val != "y" {
 		t.Fatalf("prompt buffer=%s", val)
 	}
 }
@@ -123,7 +123,7 @@ function init(h)
   plugin.command(h, "doit")
 end
 
-function run(h, a, b)
+function doit(h, a, b)
   if b == nil then
     last = a
   else

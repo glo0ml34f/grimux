@@ -12,6 +12,10 @@ func (h *helpListener) OnChange(line []rune, pos int, key rune) ([]rune, int, bo
 	if key != '?' {
 		return nil, 0, false
 	}
+	before := strings.TrimSpace(string(line[:pos]))
+	if before != "" && !strings.HasPrefix(before, "!") {
+		return nil, 0, false
+	}
 	if pos > 0 {
 		line = append(line[:pos-1], line[pos:]...)
 		pos--

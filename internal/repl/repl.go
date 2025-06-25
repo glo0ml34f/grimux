@@ -166,6 +166,8 @@ const (
 	successColor = "\033[38;5;82m"  // success messages
 	warnColor    = "\033[38;5;196m" // warnings or important prompts
 	pluginColor  = "\033[38;5;229m" // plugin output
+	paneColor    = "\033[38;5;214m" // tmux pane listings
+	bufferColor  = "\033[38;5;39m"  // buffer listings
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
@@ -180,6 +182,8 @@ type pluginMsg struct{ name, text string }
 // startup.
 var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
+var basePrompt string
+var cwdLine string
 
 func captureOut(text string, newline bool) {
 	if outputCapture != nil {
@@ -227,6 +231,10 @@ func flushPluginMsgs() {
 }
 
 var respSep = strings.Repeat("─", 40)
+
+func respDivider() {
+	fmt.Println(colorize(respColor, time.Now().Format("2006-01-02 15:04:05 ")+respSep))
+}
 
 func renderMarkdown(md string) {
 	md = plugin.GetManager().RunHook("before_markdown", "", md)
@@ -494,7 +502,7 @@ func writePath(path string, data []byte) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-var requiredBins = []string{"tmux", "vim", "batcat", "bash", "nc", "git", "cdiff"}
+var requiredBins = []string{"tmux", "vim", "batcat", "bash", "socat", "git", "cdiff"}
 
 func checkDeps() error {
 	for _, b := range requiredBins {
@@ -549,7 +557,6 @@ func bootScreen() {
 		"Loading neural subroutines... " + ok(),
 		"Calibrating sarcasm engines... " + ok(),
 		"Quantum flux capacitor stable... " + ok(),
-		colorize(warnColor, "PRESS RETURN IF YOU DARE"),
 	}
 	for _, l := range lines {
 		cprintln(l)
@@ -929,11 +936,14 @@ func Run() error {
 	client, err := openai.NewClient()
 
 	setPrompt := func() {
+		cwdLine, _ = os.Getwd()
 		if sessionName != "" {
-			rl.SetPrompt(fmt.Sprintf("\033[1;35mgrimux(%s)😈> \033[0m", sessionName))
+			basePrompt = fmt.Sprintf("\033[1;35mgrimux(%s)😈> \033[0m", sessionName)
 		} else {
-			rl.SetPrompt("\033[1;35mgrimux😈> \033[0m")
+			basePrompt = "\033[1;35mgrimux😈> \033[0m"
 		}
+		fmt.Println(cwdLine)
+		rl.SetPrompt(basePrompt)
 	}
 
 	if !seriousMode {
@@ -964,11 +974,10 @@ func Run() error {
 			stop()
 			if err == nil {
 				cprintln("Checking OpenAI integration... " + ok())
-				respPrintln(respSep)
+				respDivider()
 				renderMarkdown(reply)
 				forceEnter()
-				respPrintln(respSep)
-				bootScreen()
+				respDivider()
 			} else {
 				cprintln("openai error: " + err.Error())
 			}
@@ -980,6 +989,8 @@ func Run() error {
 			cprintln("dependency error: " + err.Error())
 			return err
 		}
+		bootScreen()
+		cprintln(colorize(warnColor, "PRESS RETURN IF YOU DARE"))
 	}
 
 	setPrompt()
@@ -1030,9 +1041,9 @@ func Run() error {
 				if err != nil {
 					cprintln("openai error: " + err.Error())
 				} else {
-					respPrintln(respSep)
+					respDivider()
 					renderMarkdown(reply)
-					respPrintln(respSep)
+					respDivider()
 					buffers["%code"] = lastCodeBlock(reply)
 					if auditMode {
 						auditLog = append(auditLog, reply)
@@ -1144,10 +1155,17 @@ func handleCommand(cmd string) bool {
 	case "!x":
 		return true
 	case "!ls":
+		lsCmd := exec.Command("ls", "-lh")
+		lsCmd.Stdout = os.Stdout
+		lsCmd.Stderr = os.Stdout
+		lsCmd.Run()
+		forceEnter()
+		cmdPrintln(colorize(paneColor, "Panes:"))
 		c := exec.Command("tmux", "list-panes", "-F", "#{pane_id} #{pane_title} #{pane_current_command}")
 		c.Stdout = os.Stdout
 		c.Run()
 		forceEnter()
+		cmdPrintln(colorize(bufferColor, "Buffers:"))
 		for k, v := range buffers {
 			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
 		}
@@ -1302,9 +1320,9 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		buffers[fields[1]] = reply
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		if auditMode {
 			auditLog = append(auditLog, reply)
 			maybeSummarizeAudit()
@@ -1329,9 +1347,9 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		buffers[fields[1]] = lastCodeBlock(reply)
-		respPrintln(respSep)
+		respDivider()
 		renderMarkdown(reply)
-		respPrintln(respSep)
+		respDivider()
 		if auditMode {
 			auditLog = append(auditLog, reply)
 			maybeSummarizeAudit()
@@ -1529,9 +1547,9 @@ func handleCommand(cmd string) bool {
 				return false
 			}
 		}
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		buffers["%code"] = lastCodeBlock(reply)
 		forceEnter()
 	case "!grep":
@@ -1628,9 +1646,9 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		buffers[fields[1]] = reply
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		if auditMode {
 			auditLog = append(auditLog, reply)
 			maybeSummarizeAudit()
@@ -1903,7 +1921,12 @@ func handleCommand(cmd string) bool {
 		switch fields[1] {
 		case "list":
 			for _, info := range plugin.GetManager().List() {
-				cmdPrintln(fmt.Sprintf("%s %s", info.Name, info.Version))
+				hooks := plugin.GetManager().HookNames(info.Name)
+				hookStr := ""
+				if len(hooks) > 0 {
+					hookStr = " [" + strings.Join(hooks, ",") + "]"
+				}
+				cmdPrintln(fmt.Sprintf("%s %s%s", info.Name, info.Version, hookStr))
 			}
 		case "unload":
 			if len(fields) < 3 {
@@ -1945,7 +1968,7 @@ func handleCommand(cmd string) bool {
 			cmdPrintln(info.Usage + " - " + info.Desc)
 		}
 		if len(pluginCommandOrder) > 0 {
-			cmdPrintln("plugin commands:")
+			cmdPrintln(colorize(pluginColor, "---- plugin commands ----"))
 			for _, name := range pluginCommandOrder {
 				info := commands[name]
 				cmdPrintln(info.Usage + " - " + info.Desc)
@@ -1974,9 +1997,9 @@ func handleCommand(cmd string) bool {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		buffers["%@"] = reply
 		if auditMode {
 			auditLog = append(auditLog, reply)
