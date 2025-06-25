@@ -1,6 +1,9 @@
+![20250624_1954_Grimux_ Cyberpunk Hack Demon_simple_compose_01jyj94cr1f55sw04c4dfq1v6m](https://github.com/user-attachments/assets/96d82172-67e2-4f77-aed5-4cd916646644)
+
+
 # grimux 😈
 
-Grimux is a tmux REPL built for composable hacking rituals. Commands read from and write to named buffers so you can capture text from panes, transform it and feed it back into the next step. Nothing is stored unless you save a session, keeping the workflow quick and ephemeral.
+Grimux is a tmux  co-pilot REPL built for composable hacking rituals with LLMs. Commands read from and write to named buffers so you can capture text from panes, transform it and feed it back into the next step. Nothing is stored unless you save a session, keeping the workflow quick and ephemeral.
 
 ## Goals
 - Minimal friction text manipulation
