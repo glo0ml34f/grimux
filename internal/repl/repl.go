@@ -942,7 +942,8 @@ func Run() error {
 		} else {
 			basePrompt = "\033[1;35mgrimux😈> \033[0m"
 		}
-		rl.SetPrompt(fmt.Sprintf("%s\n%s", cwdLine, basePrompt))
+		fmt.Println(cwdLine)
+		rl.SetPrompt(basePrompt)
 	}
 
 	if !seriousMode {
