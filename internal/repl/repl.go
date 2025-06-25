@@ -100,13 +100,10 @@ var Version string
 
 var banFile string
 
-// askPrefix is prepended to user prompts when using !a.
-const defaultAskPrefix = "You are a offensive security co-pilot, please answer the following prompt with high technical accuracy from a pentesting angle. Please response to the following prompt using hacker lingo and use pithy markdown with liberal emojis: "
+// askPrefix is prepended to prompts when no command is given.
+const defaultAskPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Provide succinct responses formatted in Markdown: "
 
 var askPrefix = defaultAskPrefix
-
-// chatPrefix is used when the user types plain text without a command.
-const chatPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Provide succinct responses formatted in Markdown: "
 
 func loadConfig() {
 	home, err := os.UserHomeDir()
@@ -278,7 +275,7 @@ type commandInfo struct {
 }
 
 var commandOrder = []string{
-	"!observe", "!ls", "!quit", "!x", "!a", "!save",
+	"!observe", "!ls", "!quit", "!x", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!recap", "!md", "!run_on", "!flow",
 	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!nc", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme",
@@ -326,7 +323,6 @@ var commands = map[string]commandInfo{
 	"!plugin":     {Usage: "!plugin <list|unload|reload|mute> [name]", Desc: "manage plugins"},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!version":    {Usage: "!version", Desc: "show grimux version"},
-	"!a":          {Usage: "!a <prompt>", Desc: "ask the AI with prefix", Params: []paramInfo{{"<prompt>", "text prompt"}}},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 	"!helpme":     {Usage: "!helpme <question>", Desc: "ask the AI for help using grimux"},
 }
@@ -999,12 +995,14 @@ func Run() error {
 			history = append(history, line)
 			rl.SaveHistory(line)
 		} else {
+			var capBuf bytes.Buffer
+			outputCapture = &capBuf
 			client, err := openai.NewClient()
 			if err != nil {
 				cmdPrintln(err.Error())
 			} else {
 				promptText := replaceBufferRefs(replacePaneRefs(line))
-				promptText = chatPrefix + promptText
+				promptText = askPrefix + promptText
 				stop := spinner()
 				reply, err := client.SendPrompt(promptText)
 				stop()
@@ -1022,6 +1020,9 @@ func Run() error {
 					forceEnter()
 				}
 			}
+			outputCapture = nil
+			buffers["%@"] = capBuf.String()
+			updateSessionBuffer()
 			history = append(history, line)
 			rl.SaveHistory(line)
 		}
@@ -1914,35 +1915,6 @@ func handleCommand(cmd string) bool {
 		playGame()
 	case "!version":
 		cmdPrintln(fmt.Sprintf("jayne <gloomleaf@pm.me> says the version is: %s", Version))
-	case "!a":
-		if len(fields) < 2 {
-			usage("!a")
-			return false
-		}
-		client, err := openai.NewClient()
-		if err != nil {
-			cmdPrintln(err.Error())
-			return false
-		}
-		promptText := replaceBufferRefs(replacePaneRefs(strings.Join(fields[1:], " ")))
-		promptText = askPrefix + promptText
-		stop := spinner()
-		reply, err := client.SendPrompt(promptText)
-		stop()
-		if err != nil {
-			cprintln("openai error: " + err.Error())
-			return false
-		}
-		code := lastCodeBlock(reply)
-		respPrintln(respSep)
-		renderMarkdown(reply)
-		respPrintln(respSep)
-		buffers["%code"] = code
-		if auditMode {
-			auditLog = append(auditLog, reply)
-			maybeSummarizeAudit()
-		}
-		forceEnter()
 	case "!help":
 		for _, name := range commandOrder {
 			info := commands[name]
