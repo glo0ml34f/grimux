@@ -152,6 +152,44 @@ end
 		t.Fatalf("last=%v", v)
 	}
 }
+
+func TestCommandArgBuffer(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  local info = {name="pbuf", grimux="0.1.0", version="0.1.0"}
+  local json = '{"name":"pbuf","grimux":"0.1.0","version":"0.1.0"}'
+  plugin.register(h, json)
+  plugin.command(h, "echo")
+end
+
+function echo(h, val)
+  last = val
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+
+	buf := map[string]string{"%foo": "bar"}
+	SetPrintHandler(func(*Plugin, string) {})
+	SetReadBufferFunc(func(n string) (string, bool) { v, ok := buf[n]; return v, ok })
+	SetWriteBufferFunc(func(n, v string) { buf[n] = v })
+
+	p, err := GetManager().Load(luaFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	defer GetManager().Unload(p.Info.Name)
+
+	if err := GetManager().RunCommand("pbuf.echo", []string{"%foo"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if v := p.L.GetGlobal("last"); v.String() != "bar" {
+		t.Fatalf("last=%v", v)
+	}
+}
 func TestHookPrintInfo(t *testing.T) {
 	dir := t.TempDir()
 	luaFile := filepath.Join(dir, "plug.lua")
