@@ -995,6 +995,8 @@ func Run() error {
 			history = append(history, line)
 			rl.SaveHistory(line)
 		} else {
+			var capBuf bytes.Buffer
+			outputCapture = &capBuf
 			client, err := openai.NewClient()
 			if err != nil {
 				cmdPrintln(err.Error())
@@ -1018,6 +1020,9 @@ func Run() error {
 					forceEnter()
 				}
 			}
+			outputCapture = nil
+			buffers["%@"] = capBuf.String()
+			updateSessionBuffer()
 			history = append(history, line)
 			rl.SaveHistory(line)
 		}
