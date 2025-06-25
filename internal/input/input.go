@@ -20,7 +20,6 @@ func GetReadline() *readline.Instance { return rl }
 func ReadPasswordPrompt(prompt string) (string, error) {
 	if rl != nil {
 		b, err := rl.ReadPassword(prompt)
-		fmt.Fprintln(rl.Stdout())
 		return string(b), err
 	}
 	fmt.Fprint(os.Stdout, prompt)

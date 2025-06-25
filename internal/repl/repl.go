@@ -166,6 +166,8 @@ const (
 	successColor = "\033[38;5;82m"  // success messages
 	warnColor    = "\033[38;5;196m" // warnings or important prompts
 	pluginColor  = "\033[38;5;229m" // plugin output
+	paneColor    = "\033[38;5;214m" // tmux pane listings
+	bufferColor  = "\033[38;5;39m"  // buffer listings
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
@@ -180,6 +182,8 @@ type pluginMsg struct{ name, text string }
 // startup.
 var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
+var basePrompt string
+var cwdLine string
 
 func captureOut(text string, newline bool) {
 	if outputCapture != nil {
@@ -190,16 +194,18 @@ func captureOut(text string, newline bool) {
 	}
 }
 
-func cprintln(s string)       { captureOut(s, true); fmt.Println(colorize(grimColor, s)) }
+func ts() string { return time.Now().Format("2006-01-02 15:04:05 ") }
+
+func cprintln(s string)       { captureOut(s, true); fmt.Println(colorize(grimColor, ts()+s)) }
 func cprint(s string)         { captureOut(s, false); fmt.Print(colorize(grimColor, s)) }
-func cmdPrintln(s string)     { captureOut(s, true); fmt.Println(colorize(cmdColor, s)) }
-func respPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(respColor, s)) }
-func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(successColor, s)) }
-func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, s)) }
+func cmdPrintln(s string)     { captureOut(s, true); fmt.Println(colorize(cmdColor, ts()+s)) }
+func respPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(respColor, ts()+s)) }
+func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(successColor, ts()+s)) }
+func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, ts()+s)) }
 func pluginPrintln(name, s string) {
 	captureOut(s, true)
 	fmt.Println()
-	fmt.Println(colorize(pluginColor, fmt.Sprintf("[plugin:%s] %s", name, s)))
+	fmt.Println(colorize(pluginColor, ts()+fmt.Sprintf("[plugin:%s] %s", name, s)))
 }
 func ok() string { return colorize(successColor, "✅") }
 
@@ -520,11 +526,24 @@ func spinner() func() {
 		for {
 			select {
 			case <-done:
-				fmt.Print("\r\033[J")
+				rl := input.GetReadline()
+				if rl != nil {
+					rl.SetPrompt(fmt.Sprintf("%s\n%s", cwdLine, basePrompt))
+					rl.Refresh()
+				} else {
+					fmt.Print("\r\033[J")
+				}
 				close(finished)
 				return
 			default:
-				fmt.Printf("\r%s", colorize(respColor, frames[i%len(frames)]))
+				rl := input.GetReadline()
+				if rl != nil {
+					frame := frames[i%len(frames)]
+					rl.SetPrompt(fmt.Sprintf("%s\n%s", cwdLine, strings.Replace(basePrompt, "😈", frame, 1)))
+					rl.Refresh()
+				} else {
+					fmt.Printf("\r%s", colorize(respColor, frames[i%len(frames)]))
+				}
 				time.Sleep(300 * time.Millisecond)
 				i++
 			}
@@ -549,7 +568,6 @@ func bootScreen() {
 		"Loading neural subroutines... " + ok(),
 		"Calibrating sarcasm engines... " + ok(),
 		"Quantum flux capacitor stable... " + ok(),
-		colorize(warnColor, "PRESS RETURN IF YOU DARE"),
 	}
 	for _, l := range lines {
 		cprintln(l)
@@ -929,11 +947,13 @@ func Run() error {
 	client, err := openai.NewClient()
 
 	setPrompt := func() {
+		cwdLine, _ = os.Getwd()
 		if sessionName != "" {
-			rl.SetPrompt(fmt.Sprintf("\033[1;35mgrimux(%s)😈> \033[0m", sessionName))
+			basePrompt = fmt.Sprintf("\033[1;35mgrimux(%s)😈> \033[0m", sessionName)
 		} else {
-			rl.SetPrompt("\033[1;35mgrimux😈> \033[0m")
+			basePrompt = "\033[1;35mgrimux😈> \033[0m"
 		}
+		rl.SetPrompt(fmt.Sprintf("%s\n%s", cwdLine, basePrompt))
 	}
 
 	if !seriousMode {
@@ -968,7 +988,6 @@ func Run() error {
 				renderMarkdown(reply)
 				forceEnter()
 				respPrintln(respSep)
-				bootScreen()
 			} else {
 				cprintln("openai error: " + err.Error())
 			}
@@ -980,6 +999,8 @@ func Run() error {
 			cprintln("dependency error: " + err.Error())
 			return err
 		}
+		bootScreen()
+		cprintln(colorize(warnColor, "PRESS RETURN IF YOU DARE"))
 	}
 
 	setPrompt()
@@ -1144,10 +1165,17 @@ func handleCommand(cmd string) bool {
 	case "!x":
 		return true
 	case "!ls":
+		lsCmd := exec.Command("ls", "-lh")
+		lsCmd.Stdout = os.Stdout
+		lsCmd.Stderr = os.Stdout
+		lsCmd.Run()
+		forceEnter()
+		cmdPrintln(colorize(paneColor, "Panes:"))
 		c := exec.Command("tmux", "list-panes", "-F", "#{pane_id} #{pane_title} #{pane_current_command}")
 		c.Stdout = os.Stdout
 		c.Run()
 		forceEnter()
+		cmdPrintln(colorize(bufferColor, "Buffers:"))
 		for k, v := range buffers {
 			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
 		}
@@ -1903,7 +1931,12 @@ func handleCommand(cmd string) bool {
 		switch fields[1] {
 		case "list":
 			for _, info := range plugin.GetManager().List() {
-				cmdPrintln(fmt.Sprintf("%s %s", info.Name, info.Version))
+				hooks := plugin.GetManager().HookNames(info.Name)
+				hookStr := ""
+				if len(hooks) > 0 {
+					hookStr = " [" + strings.Join(hooks, ",") + "]"
+				}
+				cmdPrintln(fmt.Sprintf("%s %s%s", info.Name, info.Version, hookStr))
 			}
 		case "unload":
 			if len(fields) < 3 {
@@ -1945,7 +1978,7 @@ func handleCommand(cmd string) bool {
 			cmdPrintln(info.Usage + " - " + info.Desc)
 		}
 		if len(pluginCommandOrder) > 0 {
-			cmdPrintln("plugin commands:")
+			cmdPrintln(colorize(pluginColor, "---- plugin commands ----"))
 			for _, name := range pluginCommandOrder {
 				info := commands[name]
 				cmdPrintln(info.Usage + " - " + info.Desc)
