@@ -4,6 +4,9 @@
 # grimux 😈
 
 Grimux is a tmux  co-pilot REPL built for composable hacking rituals with LLMs. Commands read from and write to named buffers so you can capture text from panes, transform it and feed it back into the next step. Nothing is stored unless you save a session, keeping the workflow quick and ephemeral.
+![grimux_in_use](https://github.com/user-attachments/assets/cc86eeb1-55e8-45b3-8259-7d615b5d40a9)
+
+
 
 ## Goals
 - Minimal friction text manipulation
@@ -19,6 +22,8 @@ go build ./cmd/grimux
 ```
 Press `?` for inline help or `!help` once the prompt appears.
 For a deeper walkthrough see [docs/guide.md](docs/guide.md)
+
+
 
 ## Buffers and panes
 Buffers are scratch spaces like `%file`, `%code` and `%@`. They hold text for
