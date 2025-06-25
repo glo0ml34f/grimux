@@ -8,14 +8,28 @@ end
 
 function create(h, repo, title, body, token, host)
   if not repo or repo == "" then
-    repo = plugin.prompt(h, "repo", "repository (owner/repo): ")
+    repo = plugin.read(h, "repo")
+    if not repo or repo == "" then
+      repo = plugin.prompt(h, "repo", "repository (owner/repo): ")
+    end
   end
+  plugin.write(h, "repo", repo)
+
   if not title or title == "" then
-    title = plugin.prompt(h, "title", "issue title: ")
+    title = plugin.read(h, "title")
+    if not title or title == "" then
+      title = plugin.prompt(h, "title", "issue title: ")
+    end
   end
+  plugin.write(h, "title", title)
+
   if not body or body == "" then
-    body = plugin.prompt(h, "body", "issue body: ")
+    body = plugin.read(h, "body")
+    if not body or body == "" then
+      body = plugin.prompt(h, "body", "issue body: ")
+    end
   end
+  plugin.write(h, "body", body)
 
   if not host or host == "" then
     host = plugin.read(h, "host")
@@ -39,7 +53,7 @@ function create(h, repo, title, body, token, host)
 
   local url = plugin.format(h, "https://%s/repos/%s/issues", host, repo)
   local opts = plugin.format(h,
-    '{"json":{"title":"%s","body":"%s"},"headers":{"Authorization":"token %s","User-Agent":"grimux"}}',
+    '{"json":{"title":%q,"body":%q},"headers":{"Authorization":"token %s","User-Agent":"grimux"}}',
     title, body, token)
   local resp, status = plugin.http(h, "POST", url, opts)
   if status == 201 then
