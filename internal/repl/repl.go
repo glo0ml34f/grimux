@@ -178,7 +178,10 @@ var viewerRunning bool // true when $VIEWER is active
 var pendingGrass bool  // track delayed grass messages
 type pluginMsg struct{ name, text string }
 
-var pluginMsgCh = make(chan pluginMsg, 10)
+// pluginMsgCh buffers plugin output until the REPL is ready to display it.
+// A larger buffer avoids deadlocks when many hooks print messages during
+// startup.
+var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
 
 func captureOut(text string, newline bool) {
@@ -229,6 +232,7 @@ func flushPluginMsgs() {
 var respSep = strings.Repeat("─", 40)
 
 func renderMarkdown(md string) {
+	md = plugin.GetManager().RunHook("before_markdown", "", md)
 	out, err := glamour.Render(md, "dark")
 	if err != nil {
 		captureOut(md, true)
@@ -437,6 +441,7 @@ func writeBuffer(name, data string) {
 		tmux.SendKeys(name, data)
 		return
 	}
+	data = plugin.GetManager().RunHook("before_write", name, data)
 	buffers[name] = data
 }
 
@@ -835,7 +840,11 @@ func Run() error {
 
 	updateSessionBuffer()
 	plugin.SetPrintHandler(func(p *plugin.Plugin, msg string) {
-		pluginMsgCh <- pluginMsg{name: p.Info.Name, text: msg}
+		select {
+		case pluginMsgCh <- pluginMsg{name: p.Info.Name, text: msg}:
+		default:
+			// drop if buffer is full to avoid blocking during startup
+		}
 	})
 	plugin.SetReadBufferFunc(func(name string) (string, bool) { return readBuffer(name) })
 	plugin.SetWriteBufferFunc(func(name, data string) { writeBuffer(name, data) })
@@ -855,6 +864,9 @@ func Run() error {
 	plugin.SetCommandRemoveFunc(removePluginCommand)
 	if err := plugin.GetManager().LoadAll(); err != nil {
 		cprintln("plugin load error: " + err.Error())
+	}
+	if len(plugin.GetManager().List()) > 0 {
+		cprintln("\u26A0\uFE0F  plugins can run arbitrary code. Use only trusted ones.")
 	}
 	flushPluginMsgs()
 
@@ -882,7 +894,6 @@ func Run() error {
 		}
 	}()
 
-	client, err := openai.NewClient()
 	cfg := readline.Config{
 		DisableAutoSaveHistory: true,
 		AutoComplete:           &autoCompleter{},
@@ -898,6 +909,7 @@ func Run() error {
 	for _, h := range history {
 		rl.SaveHistory(h)
 	}
+	client, err := openai.NewClient()
 
 	setPrompt := func() {
 		if sessionName != "" {
@@ -925,7 +937,12 @@ func Run() error {
 			client.SendPrompt("ping")
 		} else {
 			p := prompts[rand.Intn(len(prompts))]
-			stop := spinner()
+			var stop func()
+			if !plugin.GetManager().HasHook("before_openai") && !plugin.GetManager().HasHook("after_openai") {
+				stop = spinner()
+			} else {
+				stop = func() {}
+			}
 			reply, err := client.SendPrompt(p + "and please keep your response short, pithy, and funny")
 			stop()
 			if err == nil {
@@ -1063,6 +1080,7 @@ func saveSession() {
 }
 
 func handleCommand(cmd string) bool {
+	cmd = plugin.GetManager().RunHook("before_command", "", cmd)
 	fields := strings.Fields(cmd)
 	for i := range fields {
 		fields[i] = sanitize(fields[i])

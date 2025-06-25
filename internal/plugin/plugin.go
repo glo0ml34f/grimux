@@ -258,6 +258,9 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			}
 			if !exists {
 				p.hooks[hookName] = append(p.hooks[hookName], cb)
+				if m.printFn != nil && !m.mute[p.Info.Name] {
+					m.printFn(p, fmt.Sprintf("hook registered: %s", hookName))
+				}
 			}
 			L.Push(lua.LString(p.Handle))
 			return 1
@@ -466,6 +469,16 @@ func (m *Manager) RunHook(name, buf string, data string) string {
 		}
 	}
 	return out
+}
+
+// HasHook reports whether any plugin has registered the given hook name.
+func (m *Manager) HasHook(name string) bool {
+	for _, p := range m.plugins {
+		if len(p.hooks[name]) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterCommand registers a new REPL command for the plugin.
