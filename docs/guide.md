@@ -91,7 +91,6 @@ Below is an expanded reference with ideas for how each command might aid your re
 
 - `!gen <buf> <prompt>` – general purpose prompts to the AI. The response lands in `<buf>`.
 - `!code <buf> <prompt>` – specifically ask the AI for code and store it.
-- `!a <prompt>` – quick ask with your current prefix (see `!prefix`).
 - `!sum <buf>` – summarize long output, such as logs or disassembly.
 - `!helpme <question>` – ask for help about Grimux itself.
 - `!model <name>` – change the OpenAI model if you have access to others.
@@ -111,7 +110,7 @@ Set context for the AI with a prefix so you don't need to repeat yourself.
 
 ```bash
 !prefix %file          # load prefix from file into the session
-!a "summarize the binary protocol"
+"summarize the binary protocol"   # plain text uses the active prefix
 ```
 
 Use `!get_prompt` to show the current prefix, and `!reset` to clear it along with session state.

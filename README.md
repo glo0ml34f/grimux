@@ -30,6 +30,7 @@ Use `%null` when you want to discard output entirely.
 3. Edit or run commands on that buffer with `!edit %buf` or `!run %buf <cmd>`
 4. Send the text to the AI with `!gen %buf <prompt>` or `!code %buf <prompt>`
 5. Results land in `%@` for chaining into the next action
+6. Plain text entered at the prompt is sent to the AI using your current prefix (Grimux by default)
 
 ## Command reference
 - `!quit` – save session and quit
@@ -72,7 +73,6 @@ Use `%null` when you want to discard output entirely.
 - `!rm <buffer>` – remove a buffer
 - `!game` – play a tiny game
 - `!version` – show grimux version
-- `!a <prompt>` – ask the AI with prefix
 - `!help` – show this help
 - `!helpme <question>` – ask the AI for help using grimux
 
