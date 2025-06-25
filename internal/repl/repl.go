@@ -74,7 +74,7 @@ type config struct {
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
 // bufferPattern matches buffer references like %foo or %@
-var bufferPattern = regexp.MustCompile(`%[@a-zA-Z0-9_]+`)
+var bufferPattern = regexp.MustCompile(`%(\[[^]]+\]|[@a-zA-Z0-9_]+)`)
 var codeBlockPattern = regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]+)\n(.*?)\n```")
 var buffers = map[string]string{
 	"%file": "",
@@ -168,6 +168,7 @@ const (
 	pluginColor  = "\033[38;5;229m" // plugin output
 	paneColor    = "\033[38;5;214m" // tmux pane listings
 	bufferColor  = "\033[38;5;39m"  // buffer listings
+	tmuxBufColor = "\033[38;5;178m" // tmux buffer listings
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
@@ -385,6 +386,13 @@ func replaceBufferRefs(text string) string {
 					return out
 				}
 			}
+			if isTmuxBuffer(tok) {
+				out, err := tmux.ShowBuffer(tmuxBufferName(tok))
+				if err == nil {
+					buffers[tok] = out
+					return out
+				}
+			}
 		}
 		return tok
 	})
@@ -417,6 +425,15 @@ func isPaneID(name string) bool {
 	return false
 }
 
+// isTmuxBuffer reports whether the name refers to a tmux buffer using %[name] syntax.
+func isTmuxBuffer(name string) bool {
+	return strings.HasPrefix(name, "%[") && strings.HasSuffix(name, "]") && len(name) > 3
+}
+
+func tmuxBufferName(name string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(name, "%["), "]")
+}
+
 // readBuffer returns the contents of a buffer or pane capture.
 func readBuffer(name string) (string, bool) {
 	if name == "%null" {
@@ -433,6 +450,14 @@ func readBuffer(name string) (string, bool) {
 			return out, true
 		}
 	}
+	if isTmuxBuffer(name) {
+		out, err := tmux.ShowBuffer(tmuxBufferName(name))
+		if err == nil {
+			out = plugin.GetManager().RunHook("after_read", name, out)
+			buffers[name] = out
+			return out, true
+		}
+	}
 	return "", false
 }
 
@@ -443,6 +468,12 @@ func writeBuffer(name, data string) {
 	}
 	if isPaneID(name) {
 		tmux.SendKeys(name, data)
+		return
+	}
+	if isTmuxBuffer(name) {
+		tmux.SetBuffer(tmuxBufferName(name), data)
+		data = plugin.GetManager().RunHook("before_write", name, data)
+		buffers[name] = data
 		return
 	}
 	data = plugin.GetManager().RunHook("before_write", name, data)
@@ -1165,6 +1196,13 @@ func handleCommand(cmd string) bool {
 		c.Stdout = os.Stdout
 		c.Run()
 		forceEnter()
+		if bufs, err := tmux.ListBuffers(); err == nil && len(bufs) > 0 {
+			cmdPrintln(colorize(tmuxBufColor, "Tmux Buffers:"))
+			for _, b := range bufs {
+				cmdPrintln(fmt.Sprintf("%%[%s]", b))
+			}
+			forceEnter()
+		}
 		cmdPrintln(colorize(bufferColor, "Buffers:"))
 		for k, v := range buffers {
 			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
