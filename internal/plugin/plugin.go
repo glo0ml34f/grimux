@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -53,6 +54,8 @@ var addCmdFn func(string)
 var delCmdFn func(string)
 var genCmdFn func(string, string) (string, error)
 var socatCmdFn func(string, []string) (string, error)
+
+var bufferPattern = regexp.MustCompile(`%[@a-zA-Z0-9_]+`)
 
 // GetManager returns the global plugin manager.
 func GetManager() *Manager { return mgr }
@@ -599,6 +602,14 @@ func (m *Manager) RunCommand(name string, args []string) error {
 	}
 	vals := []lua.LValue{lua.LString(p.Handle)}
 	for _, a := range args {
+		if readBufFn != nil {
+			a = bufferPattern.ReplaceAllStringFunc(a, func(tok string) string {
+				if val, ok := readBufFn(tok); ok {
+					return val
+				}
+				return tok
+			})
+		}
 		vals = append(vals, lua.LString(a))
 	}
 	return p.L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}, vals...)
