@@ -194,18 +194,16 @@ func captureOut(text string, newline bool) {
 	}
 }
 
-func ts() string { return time.Now().Format("2006-01-02 15:04:05 ") }
-
-func cprintln(s string)       { captureOut(s, true); fmt.Println(colorize(grimColor, ts()+s)) }
+func cprintln(s string)       { captureOut(s, true); fmt.Println(colorize(grimColor, s)) }
 func cprint(s string)         { captureOut(s, false); fmt.Print(colorize(grimColor, s)) }
-func cmdPrintln(s string)     { captureOut(s, true); fmt.Println(colorize(cmdColor, ts()+s)) }
-func respPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(respColor, ts()+s)) }
-func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(successColor, ts()+s)) }
-func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, ts()+s)) }
+func cmdPrintln(s string)     { captureOut(s, true); fmt.Println(colorize(cmdColor, s)) }
+func respPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(respColor, s)) }
+func successPrintln(s string) { captureOut(s, true); fmt.Println(colorize(successColor, s)) }
+func warnPrintln(s string)    { captureOut(s, true); fmt.Println(colorize(warnColor, s)) }
 func pluginPrintln(name, s string) {
 	captureOut(s, true)
 	fmt.Println()
-	fmt.Println(colorize(pluginColor, ts()+fmt.Sprintf("[plugin:%s] %s", name, s)))
+	fmt.Println(colorize(pluginColor, fmt.Sprintf("[plugin:%s] %s", name, s)))
 }
 func ok() string { return colorize(successColor, "✅") }
 
@@ -233,6 +231,10 @@ func flushPluginMsgs() {
 }
 
 var respSep = strings.Repeat("─", 40)
+
+func respDivider() {
+	fmt.Println(colorize(respColor, time.Now().Format("2006-01-02 15:04:05 ")+respSep))
+}
 
 func renderMarkdown(md string) {
 	md = plugin.GetManager().RunHook("before_markdown", "", md)
@@ -500,7 +502,7 @@ func writePath(path string, data []byte) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-var requiredBins = []string{"tmux", "vim", "batcat", "bash", "nc", "git", "cdiff"}
+var requiredBins = []string{"tmux", "vim", "batcat", "bash", "socat", "git", "cdiff"}
 
 func checkDeps() error {
 	for _, b := range requiredBins {
@@ -526,24 +528,11 @@ func spinner() func() {
 		for {
 			select {
 			case <-done:
-				rl := input.GetReadline()
-				if rl != nil {
-					rl.SetPrompt(fmt.Sprintf("%s\n%s", cwdLine, basePrompt))
-					rl.Refresh()
-				} else {
-					fmt.Print("\r\033[J")
-				}
+				fmt.Print("\r\033[J")
 				close(finished)
 				return
 			default:
-				rl := input.GetReadline()
-				if rl != nil {
-					frame := frames[i%len(frames)]
-					rl.SetPrompt(fmt.Sprintf("%s\n%s", cwdLine, strings.Replace(basePrompt, "😈", frame, 1)))
-					rl.Refresh()
-				} else {
-					fmt.Printf("\r%s", colorize(respColor, frames[i%len(frames)]))
-				}
+				fmt.Printf("\r%s", colorize(respColor, frames[i%len(frames)]))
 				time.Sleep(300 * time.Millisecond)
 				i++
 			}
@@ -984,10 +973,10 @@ func Run() error {
 			stop()
 			if err == nil {
 				cprintln("Checking OpenAI integration... " + ok())
-				respPrintln(respSep)
+				respDivider()
 				renderMarkdown(reply)
 				forceEnter()
-				respPrintln(respSep)
+				respDivider()
 			} else {
 				cprintln("openai error: " + err.Error())
 			}
@@ -1051,9 +1040,9 @@ func Run() error {
 				if err != nil {
 					cprintln("openai error: " + err.Error())
 				} else {
-					respPrintln(respSep)
+					respDivider()
 					renderMarkdown(reply)
-					respPrintln(respSep)
+					respDivider()
 					buffers["%code"] = lastCodeBlock(reply)
 					if auditMode {
 						auditLog = append(auditLog, reply)
@@ -1330,9 +1319,9 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		buffers[fields[1]] = reply
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		if auditMode {
 			auditLog = append(auditLog, reply)
 			maybeSummarizeAudit()
@@ -1357,9 +1346,9 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		buffers[fields[1]] = lastCodeBlock(reply)
-		respPrintln(respSep)
+		respDivider()
 		renderMarkdown(reply)
-		respPrintln(respSep)
+		respDivider()
 		if auditMode {
 			auditLog = append(auditLog, reply)
 			maybeSummarizeAudit()
@@ -1557,9 +1546,9 @@ func handleCommand(cmd string) bool {
 				return false
 			}
 		}
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		buffers["%code"] = lastCodeBlock(reply)
 		forceEnter()
 	case "!grep":
@@ -1656,9 +1645,9 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		buffers[fields[1]] = reply
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		if auditMode {
 			auditLog = append(auditLog, reply)
 			maybeSummarizeAudit()
@@ -2007,9 +1996,9 @@ func handleCommand(cmd string) bool {
 			cprintln("openai error: " + err.Error())
 			return false
 		}
-		respPrintln(respSep)
+		respDivider()
 		respPrintln(reply)
-		respPrintln(respSep)
+		respDivider()
 		buffers["%@"] = reply
 		if auditMode {
 			auditLog = append(auditLog, reply)

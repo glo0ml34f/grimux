@@ -258,7 +258,7 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				p.hooks = map[string][]*lua.LFunction{}
 			}
 			if promptFn != nil {
-				msg := fmt.Sprintf("Plugin %s requests hook '%s'. Hooks can run arbitrary code. Allow? [y/N] ", p.Info.Name, hookName)
+				msg := fmt.Sprintf("Plugin %s wants hook '%s'. Malicious hooks can run any command. Allow? [y/N] ", p.Info.Name, hookName)
 				resp, err := promptFn(msg)
 				if err == nil && strings.ToLower(strings.TrimSpace(resp)) != "y" {
 					m.Unload(p.Info.Name)
