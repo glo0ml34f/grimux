@@ -178,7 +178,10 @@ var viewerRunning bool // true when $VIEWER is active
 var pendingGrass bool  // track delayed grass messages
 type pluginMsg struct{ name, text string }
 
-var pluginMsgCh = make(chan pluginMsg, 10)
+// pluginMsgCh buffers plugin output until the REPL is ready to display it.
+// A larger buffer avoids deadlocks when many hooks print messages during
+// startup.
+var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
 
 func captureOut(text string, newline bool) {
@@ -837,7 +840,11 @@ func Run() error {
 
 	updateSessionBuffer()
 	plugin.SetPrintHandler(func(p *plugin.Plugin, msg string) {
-		pluginMsgCh <- pluginMsg{name: p.Info.Name, text: msg}
+		select {
+		case pluginMsgCh <- pluginMsg{name: p.Info.Name, text: msg}:
+		default:
+			// drop if buffer is full to avoid blocking during startup
+		}
 	})
 	plugin.SetReadBufferFunc(func(name string) (string, bool) { return readBuffer(name) })
 	plugin.SetWriteBufferFunc(func(name, data string) { writeBuffer(name, data) })

@@ -242,3 +242,30 @@ end
 		t.Fatalf("hook still registered")
 	}
 }
+
+func TestManyHooks(t *testing.T) {
+	dir := t.TempDir()
+	luaFile := filepath.Join(dir, "plug.lua")
+	code := `
+function init(h)
+  local info = {name="many", grimux="0.1.0", version="0.1.0"}
+  local json = '{"name":"many","grimux":"0.1.0","version":"0.1.0"}'
+  plugin.register(h, json)
+  for i=1,20 do
+    plugin.hook(h, "h"..i, function(b,v) return v end)
+  end
+end
+`
+	if err := os.WriteFile(luaFile, []byte(code), 0o600); err != nil {
+		t.Fatalf("write lua: %v", err)
+	}
+	SetPrintHandler(func(*Plugin, string) {})
+	p, err := GetManager().Load(luaFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	defer GetManager().Unload(p.Info.Name)
+	if len(p.hooks) != 20 {
+		t.Fatalf("hook count=%d", len(p.hooks))
+	}
+}
