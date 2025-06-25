@@ -22,6 +22,7 @@ go build ./cmd/grimux
 ```
 Press `?` for inline help or `!help` once the prompt appears.
 For a deeper walkthrough see [docs/guide.md](docs/guide.md)
+To create your own commands see [docs/plugin_api.md](docs/plugin_api.md).
 
 
 
