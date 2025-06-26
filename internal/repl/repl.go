@@ -74,7 +74,7 @@ type config struct {
 var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
 // bufferPattern matches buffer references like %foo or %@
-var bufferPattern = regexp.MustCompile(`%(\[[^]]+\]|[@a-zA-Z0-9_]+)`)
+var bufferPattern = regexp.MustCompile(`%[@a-zA-Z0-9_]+`)
 var codeBlockPattern = regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]+)\n(.*?)\n```")
 var buffers = map[string]string{
 	"%file": "",
@@ -425,13 +425,26 @@ func isPaneID(name string) bool {
 	return false
 }
 
-// isTmuxBuffer reports whether the name refers to a tmux buffer using %[name] syntax.
+// isTmuxBuffer reports whether the name refers to a tmux buffer.
 func isTmuxBuffer(name string) bool {
-	return strings.HasPrefix(name, "%[") && strings.HasSuffix(name, "]") && len(name) > 3
+	if !strings.HasPrefix(name, "%") || len(name) < 2 {
+		return false
+	}
+	bufs, err := tmux.ListBuffers()
+	if err != nil {
+		return false
+	}
+	target := name[1:]
+	for _, b := range bufs {
+		if b == target {
+			return true
+		}
+	}
+	return false
 }
 
 func tmuxBufferName(name string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(name, "%["), "]")
+	return strings.TrimPrefix(name, "%")
 }
 
 // readBuffer returns the contents of a buffer or pane capture.
@@ -1196,15 +1209,23 @@ func handleCommand(cmd string) bool {
 		c.Stdout = os.Stdout
 		c.Run()
 		forceEnter()
+		var tmuxBufSet map[string]struct{}
 		if bufs, err := tmux.ListBuffers(); err == nil && len(bufs) > 0 {
+			tmuxBufSet = make(map[string]struct{}, len(bufs))
 			cmdPrintln(colorize(tmuxBufColor, "Tmux Buffers:"))
 			for _, b := range bufs {
-				cmdPrintln(fmt.Sprintf("%%[%s]", b))
+				tmuxBufSet["%"+b] = struct{}{}
+				cmdPrintln(fmt.Sprintf("%%%s", b))
 			}
 			forceEnter()
 		}
 		cmdPrintln(colorize(bufferColor, "Buffers:"))
 		for k, v := range buffers {
+			if tmuxBufSet != nil {
+				if _, ok := tmuxBufSet[k]; ok {
+					continue
+				}
+			}
 			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
 		}
 	case "!observe":
