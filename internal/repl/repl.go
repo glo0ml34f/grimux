@@ -744,6 +744,8 @@ func loadSessionFromBuffer() {
 }
 
 func updateSessionBuffer() {
+	// Apply any modifications from the %session buffer before writing a new snapshot.
+	loadSessionFromBuffer()
 	s := sessionSnapshot()
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		buffers["%session"] = string(b)
