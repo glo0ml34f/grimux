@@ -168,6 +168,7 @@ const (
 	pluginColor  = "\033[38;5;229m" // plugin output
 	paneColor    = "\033[38;5;214m" // tmux pane listings
 	bufferColor  = "\033[38;5;39m"  // buffer listings
+	tmuxBufColor = "\033[38;5;178m" // tmux buffer listings
 )
 
 func colorize(color, s string) string { return color + s + "\033[0m" }
@@ -375,16 +376,22 @@ func replacePaneRefs(text string) string {
 
 func replaceBufferRefs(text string) string {
 	return bufferPattern.ReplaceAllStringFunc(text, func(tok string) string {
-		if val, ok := buffers[tok]; ok {
-			return val
-		}
 		if strings.HasPrefix(tok, "%") && len(tok) > 1 {
+			if isTmuxBuffer(tok) {
+				out, err := tmux.ShowBuffer(tmuxBufferName(tok))
+				if err == nil {
+					return out
+				}
+			}
 			if _, err := strconv.Atoi(tok[1:]); err == nil {
 				out, err := capturePane(tok)
 				if err == nil {
 					return out
 				}
 			}
+		}
+		if val, ok := buffers[tok]; ok {
+			return val
 		}
 		return tok
 	})
@@ -417,10 +424,39 @@ func isPaneID(name string) bool {
 	return false
 }
 
+// isTmuxBuffer reports whether the name refers to a tmux buffer.
+func isTmuxBuffer(name string) bool {
+	if !strings.HasPrefix(name, "%") || len(name) < 2 {
+		return false
+	}
+	bufs, err := tmux.ListBuffers()
+	if err != nil {
+		return false
+	}
+	target := name[1:]
+	for _, b := range bufs {
+		if b.Name == target {
+			return true
+		}
+	}
+	return false
+}
+
+func tmuxBufferName(name string) string {
+	return strings.TrimPrefix(name, "%")
+}
+
 // readBuffer returns the contents of a buffer or pane capture.
 func readBuffer(name string) (string, bool) {
 	if name == "%null" {
 		return "", true
+	}
+	if isTmuxBuffer(name) {
+		out, err := tmux.ShowBuffer(tmuxBufferName(name))
+		if err == nil {
+			out = plugin.GetManager().RunHook("after_read", name, out)
+			return out, true
+		}
 	}
 	if val, ok := buffers[name]; ok {
 		val = plugin.GetManager().RunHook("after_read", name, val)
@@ -443,6 +479,10 @@ func writeBuffer(name, data string) {
 	}
 	if isPaneID(name) {
 		tmux.SendKeys(name, data)
+		return
+	}
+	if isTmuxBuffer(name) {
+		tmux.SetBuffer(tmuxBufferName(name), data)
 		return
 	}
 	data = plugin.GetManager().RunHook("before_write", name, data)
@@ -700,6 +740,8 @@ func loadSessionFromBuffer() {
 }
 
 func updateSessionBuffer() {
+	// Apply any modifications from the %session buffer before writing a new snapshot.
+	loadSessionFromBuffer()
 	s := sessionSnapshot()
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		buffers["%session"] = string(b)
@@ -1165,8 +1207,36 @@ func handleCommand(cmd string) bool {
 		c.Stdout = os.Stdout
 		c.Run()
 		forceEnter()
-		cmdPrintln(colorize(bufferColor, "Buffers:"))
+		var tmuxBufSet map[string]struct{}
+		if bufs, err := tmux.ListBuffers(); err == nil && len(bufs) > 0 {
+			tmuxBufSet = make(map[string]struct{}, len(bufs))
+			total := 0
+			for _, b := range bufs {
+				tmuxBufSet["%"+b.Name] = struct{}{}
+				total += b.Size
+			}
+			cmdPrintln(colorize(tmuxBufColor, fmt.Sprintf("Tmux Buffers (%d bytes):", total)))
+			for _, b := range bufs {
+				cmdPrintln(fmt.Sprintf("%%%s (%d bytes)", b.Name, b.Size))
+			}
+			forceEnter()
+		}
+		total := 0
 		for k, v := range buffers {
+			if tmuxBufSet != nil {
+				if _, ok := tmuxBufSet[k]; ok {
+					continue
+				}
+			}
+			total += len(v)
+		}
+		cmdPrintln(colorize(bufferColor, fmt.Sprintf("Buffers (%d bytes):", total)))
+		for k, v := range buffers {
+			if tmuxBufSet != nil {
+				if _, ok := tmuxBufSet[k]; ok {
+					continue
+				}
+			}
 			cmdPrintln(fmt.Sprintf("%s (%d bytes)", k, len(v)))
 		}
 	case "!observe":
@@ -1240,11 +1310,18 @@ func handleCommand(cmd string) bool {
 		}
 		var data string
 		if fields[1] != "%null" {
-			var ok bool
-			data, ok = buffers[fields[1]]
-			if !ok {
-				cmdPrintln("unknown buffer")
-				return false
+			if isTmuxBuffer(fields[1]) {
+				out, err := tmux.ShowBuffer(tmuxBufferName(fields[1]))
+				if err == nil {
+					data = out
+				}
+			} else {
+				var ok bool
+				data, ok = buffers[fields[1]]
+				if !ok {
+					cmdPrintln("unknown buffer")
+					return false
+				}
 			}
 		}
 		tmp, err := os.CreateTemp("", "grimux-edit-*.tmp")
@@ -1270,7 +1347,11 @@ func handleCommand(cmd string) bool {
 		}
 		if b, err := os.ReadFile(tmp.Name()); err == nil {
 			if fields[1] != "%null" {
-				buffers[fields[1]] = string(b)
+				if isTmuxBuffer(fields[1]) {
+					tmux.SetBuffer(tmuxBufferName(fields[1]), string(b))
+				} else {
+					buffers[fields[1]] = string(b)
+				}
 			}
 		}
 		os.Remove(tmp.Name())

@@ -14,8 +14,13 @@ import (
 
 const defaultAPIURL = "https://api.openai.com/v1/chat/completions"
 
+// defaultModelName is used when the user has not configured a model.
+const defaultModelName = "gpt-4o"
+
 // ModelName controls which OpenAI model is used for requests.
-var ModelName = "gpt-4o"
+// ModelName controls which OpenAI model is used for requests. It defaults to
+// defaultModelName but can be overridden by the user or session data.
+var ModelName = defaultModelName
 
 var sessionAPIURL string
 
@@ -59,6 +64,12 @@ func NewClient() (*Client, error) {
 		}
 		key = strings.TrimSpace(line)
 		sessionAPIKey = key
+		// ensure the next prompt appears on a new line when using readline
+		if rl := input.GetReadline(); rl != nil {
+			fmt.Fprintln(rl.Stdout())
+		} else {
+			fmt.Println()
+		}
 	}
 	if key == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY not set")
@@ -83,6 +94,20 @@ func NewClient() (*Client, error) {
 	}
 	if url == "" {
 		url = defaultAPIURL
+	}
+
+	if ModelName == "" {
+		prompt := fmt.Sprintf("OpenAI model [%s]: ", defaultModelName)
+		line, err := input.ReadLinePrompt(prompt)
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			ModelName = line
+		} else {
+			ModelName = defaultModelName
+		}
 	}
 
 	return &Client{APIKey: key, APIURL: url, HTTPClient: http.DefaultClient}, nil

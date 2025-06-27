@@ -100,3 +100,62 @@ func TestSendKeys(t *testing.T) {
 		t.Fatalf("unexpected args: %q", args)
 	}
 }
+
+func TestListBuffers(t *testing.T) {
+	sock, argsFile, cleanup := startFakeTmux(t, "buf1|5\nbuf2|3\n")
+	defer cleanup()
+	os.Setenv("TMUX", sock+",s")
+
+	bufs, err := ListBuffers()
+	if err != nil {
+		t.Fatalf("ListBuffers: %v", err)
+	}
+	if len(bufs) != 2 || bufs[0].Name != "buf1" || bufs[0].Size != 5 || bufs[1].Name != "buf2" || bufs[1].Size != 3 {
+		t.Fatalf("unexpected buffers: %v", bufs)
+	}
+
+	b, _ := os.ReadFile(argsFile)
+	args := string(bytes.TrimSpace(b))
+	expected := fmt.Sprintf("-S %s list-buffers -F #{buffer_name}|#{buffer_size}", sock)
+	if args != expected {
+		t.Fatalf("unexpected args: %q", args)
+	}
+}
+
+func TestShowBuffer(t *testing.T) {
+	sock, argsFile, cleanup := startFakeTmux(t, "hello\n")
+	defer cleanup()
+	os.Setenv("TMUX", sock+",s")
+
+	out, err := ShowBuffer("foo")
+	if err != nil {
+		t.Fatalf("ShowBuffer: %v", err)
+	}
+	if out != "hello\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+
+	b, _ := os.ReadFile(argsFile)
+	args := string(bytes.TrimSpace(b))
+	expected := fmt.Sprintf("-S %s show-buffer -b foo", sock)
+	if args != expected {
+		t.Fatalf("unexpected args: %q", args)
+	}
+}
+
+func TestSetBuffer(t *testing.T) {
+	sock, argsFile, cleanup := startFakeTmux(t, "")
+	defer cleanup()
+	os.Setenv("TMUX", sock+",s")
+
+	if err := SetBuffer("foo", "data"); err != nil {
+		t.Fatalf("SetBuffer: %v", err)
+	}
+
+	b, _ := os.ReadFile(argsFile)
+	args := string(bytes.TrimSpace(b))
+	expected := fmt.Sprintf("-S %s load-buffer -b foo -", sock)
+	if args != expected {
+		t.Fatalf("unexpected args: %q", args)
+	}
+}

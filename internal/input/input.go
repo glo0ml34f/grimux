@@ -29,8 +29,9 @@ func ReadPasswordPrompt(prompt string) (string, error) {
 // ReadLinePrompt reads a line showing the given prompt.
 func ReadLinePrompt(prompt string) (string, error) {
 	if rl != nil {
-		fmt.Fprint(rl.Stdout(), prompt)
-		return rl.Readline()
+		rl.SetPrompt(prompt)
+		line, err := rl.Readline()
+		return line, err
 	}
 	fmt.Fprint(os.Stdout, prompt)
 	return ReadLine()
