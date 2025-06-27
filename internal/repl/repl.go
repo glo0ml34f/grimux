@@ -3,12 +3,19 @@ package repl
 import (
 	"bufio"
 	"bytes"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,7 +294,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!recap", "!md", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!socat", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme",
+	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!pipe", "!encode", "!hash", "!socat", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme", "!idk",
 }
 
 var commands = map[string]commandInfo{
@@ -323,6 +330,9 @@ var commands = map[string]commandInfo{
 	"!sum":        {Usage: "!sum <buffer>", Desc: "summarize buffer with LLM", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rand":       {Usage: "!rand <min> <max> <buffer>", Desc: "store random number", Params: []paramInfo{{"<min>", "min int"}, {"<max>", "max int"}, {"<buffer>", "buffer name"}}},
 	"!ascii":      {Usage: "!ascii <buffer>", Desc: "gothic ascii art of first 5 words", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!pipe":       {Usage: "!pipe <buffer> <cmd> [args]", Desc: "pipe buffer to command", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<cmd>", "command"}, {"[args]", "arguments"}}},
+	"!encode":     {Usage: "!encode <buffer> <encoding>", Desc: "encode buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<encoding>", "base64|urlsafe|uri|hex"}}},
+	"!hash":       {Usage: "!hash <buffer> <algo>", Desc: "hash buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<algo>", "md5|sha1|sha256|sha512"}}},
 	"!socat":      {Usage: "!socat <buffer> <args>", Desc: "pipe buffer to socat", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<args>", "socat arguments"}}},
 	"!curl":       {Usage: "!curl <url> [buffer] [headers]", Desc: "HTTP GET and store body", Params: []paramInfo{{"<url>", "target URL"}, {"[buffer]", "optional buffer"}, {"[headers]", "buffer with JSON headers"}}},
 	"!diff":       {Usage: "!diff <left> <right> [buffer]", Desc: "diff two buffers or files", Params: []paramInfo{{"<left>", "buffer or file"}, {"<right>", "buffer or file"}, {"[buffer]", "optional output"}}},
@@ -332,6 +342,7 @@ var commands = map[string]commandInfo{
 	"!plugin":     {Usage: "!plugin <list|unload|reload|mute> [name]", Desc: "manage plugins"},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
 	"!version":    {Usage: "!version", Desc: "show grimux version"},
+	"!idk":        {Usage: "!idk <prompt>", Desc: "strategic advice"},
 	"!help":       {Usage: "!help", Desc: "show this help"},
 	"!helpme":     {Usage: "!helpme <question>", Desc: "ask the AI for help using grimux"},
 }
@@ -921,6 +932,14 @@ func Run() error {
 	plugin.SetSocatCommandFunc(func(buf string, args []string) (string, error) {
 		data, _ := readBuffer(buf)
 		cmd := exec.Command("socat", args...)
+		cmd.Stdin = strings.NewReader(data)
+		out, err := cmd.CombinedOutput()
+		writeBuffer("%@", string(out))
+		return string(out), err
+	})
+	plugin.SetPipeCommandFunc(func(buf, cmdName string, args []string) (string, error) {
+		data, _ := readBuffer(buf)
+		cmd := exec.Command(cmdName, args...)
 		cmd.Stdin = strings.NewReader(data)
 		out, err := cmd.CombinedOutput()
 		writeBuffer("%@", string(out))
@@ -1777,6 +1796,83 @@ func handleCommand(cmd string) bool {
 		result := string(out)
 		buffers["%@"] = result
 		cmdPrintln(result)
+	case "!pipe":
+		if len(fields) < 3 {
+			usage("!pipe")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		cmd := exec.Command(fields[2], fields[3:]...)
+		cmd.Stdin = strings.NewReader(data)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			cmdPrintln(fields[2] + " error: " + err.Error())
+		}
+		buffers["%@"] = string(out)
+		cmdPrintln(string(out))
+	case "!encode":
+		if len(fields) < 3 {
+			usage("!encode")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		encType := strings.ToLower(fields[2])
+		var out string
+		switch encType {
+		case "base64", "b64":
+			out = base64.StdEncoding.EncodeToString([]byte(data))
+		case "urlsafe", "urlsafe64", "urlsafe_base64":
+			out = base64.URLEncoding.EncodeToString([]byte(data))
+		case "uri", "url":
+			out = url.QueryEscape(data)
+		case "hex":
+			out = hex.EncodeToString([]byte(data))
+		default:
+			cmdPrintln("unknown encoding")
+			return false
+		}
+		buffers["%@"] = out
+		cmdPrintln(out)
+	case "!hash":
+		if len(fields) < 3 {
+			usage("!hash")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		algo := strings.ToLower(fields[2])
+		var sum []byte
+		switch algo {
+		case "md5":
+			h := md5.Sum([]byte(data))
+			sum = h[:]
+		case "sha1":
+			h := sha1.Sum([]byte(data))
+			sum = h[:]
+		case "sha256":
+			h := sha256.Sum256([]byte(data))
+			sum = h[:]
+		case "sha512":
+			h := sha512.Sum512([]byte(data))
+			sum = h[:]
+		default:
+			cmdPrintln("unknown hash")
+			return false
+		}
+		out := fmt.Sprintf("%x", sum)
+		buffers["%@"] = out
+		cmdPrintln(out)
 	case "!socat":
 		if len(fields) < 3 {
 			usage("!socat")
@@ -2071,6 +2167,34 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		promptText := "You are tech support for grimux.\n" + helpText.String() + "\nQuestion: " + strings.Join(fields[1:], " ")
+		stop := spinner()
+		reply, err := client.SendPrompt(promptText)
+		stop()
+		if err != nil {
+			cprintln("openai error: " + err.Error())
+			return false
+		}
+		respDivider()
+		respPrintln(reply)
+		respDivider()
+		buffers["%@"] = reply
+		if auditMode {
+			auditLog = append(auditLog, reply)
+			maybeSummarizeAudit()
+		}
+		forceEnter()
+	case "!idk":
+		if len(fields) < 2 {
+			usage("!idk")
+			return false
+		}
+		client, err := openai.NewClient()
+		if err != nil {
+			cmdPrintln(err.Error())
+			return false
+		}
+		persona := "You are Idk, a strategic thinker and encouraging guide. Offer concise advice, encouragement and reflective questions."
+		promptText := persona + " " + strings.Join(fields[1:], " ")
 		stop := spinner()
 		reply, err := client.SendPrompt(promptText)
 		stop()

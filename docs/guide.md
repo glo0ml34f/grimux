@@ -82,6 +82,7 @@ Below is an expanded reference with ideas for how each command might aid your re
 
 - `!run [buf] <cmd>` – execute a shell command, optionally piping in a buffer. Use this to compile code or run enumeration scripts.
 - `!run_on <buf> <pane> <cmd>` – run a command on another pane and capture its output into `<buf>`.
+- `!pipe <buf> <cmd> [args]` – pipe a buffer to an arbitrary command.
 - `!socat <buf> <args>` – pipe a buffer to socat. Convenient for sending crafted payloads or bridging protocols.
 - `!curl <url> [buf] [hdrs]` – fetch a URL into a buffer, optionally using headers from `hdrs`.
 - `!diff <a> <b> [buf]` – show a colorized diff between buffers or files.
@@ -94,12 +95,15 @@ Below is an expanded reference with ideas for how each command might aid your re
 - `!sum <buf>` – summarize long output, such as logs or disassembly.
 - `!helpme <question>` – ask for help about Grimux itself.
 - `!model <name>` – change the OpenAI model if you have access to others.
+- `!idk <prompt>` – get strategic encouragement when you're stuck.
 
 ### Environment and Utility
 
 - `!setenv <var> <buf>` / `!getenv <var> <buf>` – bridge environment variables and buffers.
 - `!rand <min> <max> <buf>` – generate a random integer; useful for filenames or tokens.
 - `!ascii <buf>` – render gothic ASCII art of the first few words for flair.
+- `!encode <buf> <encoding>` – encode a buffer (base64, urlsafe, uri, hex).
+- `!hash <buf> <algo>` – compute a hash of a buffer (md5, sha1, sha256, sha512).
 - `!view <buf>` – open a viewer (default `batcat`) for nicer reading of long text.
 - `!version` – print Grimux's version.
 - `!game` – take a short break with a mini‑game; high scores persist in memory until you save.

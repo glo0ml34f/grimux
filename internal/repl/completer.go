@@ -29,6 +29,13 @@ func (c *autoCompleter) Do(line []rune, pos int) ([][]rune, int) {
 				suggestions = append(suggestions, id[len(prefix):])
 			}
 		}
+		bufs, _ := tmux.ListBuffers()
+		for _, b := range bufs {
+			name := "%" + b.Name
+			if strings.HasPrefix(name, prefix) {
+				suggestions = append(suggestions, name[len(prefix):])
+			}
+		}
 		matches, _ := filepath.Glob(prefix + "*")
 		for _, m := range matches {
 			if strings.HasPrefix(m, prefix) {

@@ -17,10 +17,9 @@ const defaultAPIURL = "https://api.openai.com/v1/chat/completions"
 // defaultModelName is used when the user has not configured a model.
 const defaultModelName = "gpt-4o"
 
-// ModelName controls which OpenAI model is used for requests.
-// ModelName controls which OpenAI model is used for requests. It defaults to
-// defaultModelName but can be overridden by the user or session data.
-var ModelName = defaultModelName
+// ModelName controls which OpenAI model is used for requests. It is empty until
+// configured via the environment, session data, or user prompt.
+var ModelName string
 
 var sessionAPIURL string
 
@@ -97,6 +96,9 @@ func NewClient() (*Client, error) {
 	}
 
 	if ModelName == "" {
+		ModelName = os.Getenv("OPENAI_MODEL")
+	}
+	if ModelName == "" {
 		prompt := fmt.Sprintf("OpenAI model [%s]: ", defaultModelName)
 		line, err := input.ReadLinePrompt(prompt)
 		if err != nil {
@@ -108,6 +110,9 @@ func NewClient() (*Client, error) {
 		} else {
 			ModelName = defaultModelName
 		}
+	}
+	if ModelName == "" {
+		ModelName = defaultModelName
 	}
 
 	return &Client{APIKey: key, APIURL: url, HTTPClient: http.DefaultClient}, nil
