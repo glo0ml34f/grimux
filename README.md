@@ -73,6 +73,9 @@ Use `%null` when you want to discard output entirely.
 - `!sum <buffer>` – summarize buffer with LLM
 - `!rand <min> <max> <buffer>` – store random number
 - `!ascii <buffer>` – gothic ascii art of first 5 words
+- `!pipe <buffer> <cmd> [args]` – pipe buffer to a command
+- `!encode <buffer> <encoding>` – encode a buffer (base64, urlsafe, uri, hex)
+- `!hash <buffer> <algo>` – hash a buffer (md5, sha1, sha256, sha512)
 - `!socat <buffer> <args>` – pipe buffer to socat
 - `!curl <url> [buffer] [headers]` – HTTP GET and store body with optional headers
 - `!diff <left> <right> [buffer]` – diff two buffers or files
@@ -84,6 +87,7 @@ Use `%null` when you want to discard output entirely.
 - `!version` – show grimux version
 - `!help` – show this help
 - `!helpme <question>` – ask the AI for help using grimux
+- `!idk <prompt>` – get strategic encouragement
 
 Every command except `!game` writes its output to `%@`. Use `%name` references in
 any command to insert buffer contents or `{%1}` to embed a pane capture.
@@ -99,6 +103,7 @@ any command to insert buffer contents or `{%1}` to embed a pane capture.
 ## Environment
 - `OPENAI_API_KEY` – API key used by AI commands
 - `OPENAI_API_URL` – override the OpenAI endpoint
+- `OPENAI_MODEL` – preferred OpenAI model (prompted if unset)
 - `$EDITOR` – editor for `!edit` (defaults to `vim`)
 - `$VIEWER` – viewer for `!view` (defaults to `batcat`)
 

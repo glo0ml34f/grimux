@@ -54,6 +54,7 @@ var addCmdFn func(string)
 var delCmdFn func(string)
 var genCmdFn func(string, string) (string, error)
 var socatCmdFn func(string, []string) (string, error)
+var pipeCmdFn func(string, string, []string) (string, error)
 
 var bufferPattern = regexp.MustCompile(`%[@a-zA-Z0-9_]+`)
 
@@ -83,6 +84,9 @@ func SetGenCommandFunc(fn func(string, string) (string, error)) { genCmdFn = fn 
 
 // SetSocatCommandFunc registers the function used by plugin.socat.
 func SetSocatCommandFunc(fn func(string, []string) (string, error)) { socatCmdFn = fn }
+
+// SetPipeCommandFunc registers the function used by plugin.pipe.
+func SetPipeCommandFunc(fn func(string, string, []string) (string, error)) { pipeCmdFn = fn }
 
 // Dir returns the configured plugin directory.
 func (m *Manager) Dir() string { return m.dir }
@@ -434,6 +438,30 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			out, err := socatCmdFn(pluginBufferName(p.Info.Name, buf), args)
 			if err != nil {
 				L.RaiseError("socat: %v", err)
+				return 0
+			}
+			L.Push(lua.LString(out))
+			return 1
+		},
+		"pipe": func(L *lua.LState) int {
+			handle := L.CheckString(1)
+			if handle != p.Handle {
+				L.RaiseError("invalid handle")
+				return 0
+			}
+			buf := L.CheckString(2)
+			cmd := L.CheckString(3)
+			args := make([]string, 0, L.GetTop()-3)
+			for i := 4; i <= L.GetTop(); i++ {
+				args = append(args, L.CheckString(i))
+			}
+			if pipeCmdFn == nil {
+				L.Push(lua.LString(""))
+				return 1
+			}
+			out, err := pipeCmdFn(pluginBufferName(p.Info.Name, buf), cmd, args)
+			if err != nil {
+				L.RaiseError("pipe: %v", err)
 				return 0
 			}
 			L.Push(lua.LString(out))

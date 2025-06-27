@@ -20,6 +20,8 @@ func TestSendPrompt(t *testing.T) {
 	defer srv.Close()
 	_ = os.Setenv("OPENAI_API_URL", srv.URL)
 	_ = os.Setenv("OPENAI_API_KEY", "test")
+	SetModelName(defaultModelName)
+	SetModelName(defaultModelName)
 	c, err := NewClient()
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -55,6 +57,7 @@ func TestOpenAIHooks(t *testing.T) {
 	defer srv.Close()
 	_ = os.Setenv("OPENAI_API_URL", srv.URL)
 	_ = os.Setenv("OPENAI_API_KEY", "test")
+	SetModelName(defaultModelName)
 	plugin.GetManager().Shutdown()
 	luaCode := `
 function init(h)
