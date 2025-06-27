@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -100,5 +101,27 @@ func TestIsTmuxBuffer(t *testing.T) {
 	}
 	if isTmuxBuffer("%baz") {
 		t.Fatalf("%%baz should not be detected as tmux buffer")
+	}
+}
+
+func TestReadBufferTmuxRefresh(t *testing.T) {
+	sock, argsFile, cleanup := startFakeTmux(t, "buf1\n")
+	defer cleanup()
+	os.Setenv("TMUX", sock+",s")
+
+	writeBuffer("%buf1", "old")
+	out, ok := readBuffer("%buf1")
+	if !ok {
+		t.Fatalf("readBuffer returned not ok")
+	}
+	if out != "buf1\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+
+	b, _ := os.ReadFile(argsFile)
+	args := string(bytes.TrimSpace(b))
+	expected := fmt.Sprintf("-S %s show-buffer -b buf1", sock)
+	if args != expected {
+		t.Fatalf("unexpected args: %q", args)
 	}
 }

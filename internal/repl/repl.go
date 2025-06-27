@@ -376,16 +376,7 @@ func replacePaneRefs(text string) string {
 
 func replaceBufferRefs(text string) string {
 	return bufferPattern.ReplaceAllStringFunc(text, func(tok string) string {
-		if val, ok := buffers[tok]; ok {
-			return val
-		}
 		if strings.HasPrefix(tok, "%") && len(tok) > 1 {
-			if _, err := strconv.Atoi(tok[1:]); err == nil {
-				out, err := capturePane(tok)
-				if err == nil {
-					return out
-				}
-			}
 			if isTmuxBuffer(tok) {
 				out, err := tmux.ShowBuffer(tmuxBufferName(tok))
 				if err == nil {
@@ -393,6 +384,15 @@ func replaceBufferRefs(text string) string {
 					return out
 				}
 			}
+			if _, err := strconv.Atoi(tok[1:]); err == nil {
+				out, err := capturePane(tok)
+				if err == nil {
+					return out
+				}
+			}
+		}
+		if val, ok := buffers[tok]; ok {
+			return val
 		}
 		return tok
 	})
@@ -452,6 +452,14 @@ func readBuffer(name string) (string, bool) {
 	if name == "%null" {
 		return "", true
 	}
+	if isTmuxBuffer(name) {
+		out, err := tmux.ShowBuffer(tmuxBufferName(name))
+		if err == nil {
+			out = plugin.GetManager().RunHook("after_read", name, out)
+			buffers[name] = out
+			return out, true
+		}
+	}
 	if val, ok := buffers[name]; ok {
 		val = plugin.GetManager().RunHook("after_read", name, val)
 		return val, true
@@ -460,14 +468,6 @@ func readBuffer(name string) (string, bool) {
 		out, err := capturePane(name)
 		if err == nil {
 			out = plugin.GetManager().RunHook("after_read", name, out)
-			return out, true
-		}
-	}
-	if isTmuxBuffer(name) {
-		out, err := tmux.ShowBuffer(tmuxBufferName(name))
-		if err == nil {
-			out = plugin.GetManager().RunHook("after_read", name, out)
-			buffers[name] = out
 			return out, true
 		}
 	}
