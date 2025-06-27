@@ -154,7 +154,7 @@ func TestSetBuffer(t *testing.T) {
 
 	b, _ := os.ReadFile(argsFile)
 	args := string(bytes.TrimSpace(b))
-	expected := fmt.Sprintf("-S %s set-buffer -b foo -", sock)
+	expected := fmt.Sprintf("-S %s load-buffer -b foo -", sock)
 	if args != expected {
 		t.Fatalf("unexpected args: %q", args)
 	}

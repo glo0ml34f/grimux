@@ -172,7 +172,7 @@ func SetBuffer(name, data string) error {
 		return errors.New("TMUX environment variable is not set")
 	}
 	socket := strings.Split(tmuxEnv, ",")[0]
-	args := []string{"-S", socket, "set-buffer"}
+	args := []string{"-S", socket, "load-buffer"}
 	if name != "" {
 		args = append(args, "-b", name)
 	}
