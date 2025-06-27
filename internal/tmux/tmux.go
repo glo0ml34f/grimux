@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -107,22 +108,41 @@ func ListPaneIDs() ([]string, error) {
 	return out, nil
 }
 
-// ListBuffers returns the names of all tmux buffers.
-func ListBuffers() ([]string, error) {
+// BufferInfo contains the name and size of a tmux buffer.
+type BufferInfo struct {
+	Name string
+	Size int
+}
+
+// ListBuffers returns information about all tmux buffers.
+func ListBuffers() ([]BufferInfo, error) {
 	tmuxEnv := os.Getenv("TMUX")
 	if tmuxEnv == "" {
 		return nil, errors.New("TMUX environment variable is not set")
 	}
 	socket := strings.Split(tmuxEnv, ",")[0]
-	args := []string{"-S", socket, "list-buffers", "-F", "#{buffer_name}"}
+	args := []string{"-S", socket, "list-buffers", "-F", "#{buffer_name}|#{buffer_size}"}
 	cmd := exec.Command("tmux", args...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("tmux command: %w", err)
 	}
-	out := strings.Fields(buf.String())
-	return out, nil
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	infos := make([]BufferInfo, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		name := parts[0]
+		size := 0
+		if len(parts) > 1 {
+			size, _ = strconv.Atoi(parts[1])
+		}
+		infos = append(infos, BufferInfo{Name: name, Size: size})
+	}
+	return infos, nil
 }
 
 // ShowBuffer returns the contents of the specified tmux buffer.

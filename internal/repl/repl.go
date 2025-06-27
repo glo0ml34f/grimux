@@ -380,7 +380,6 @@ func replaceBufferRefs(text string) string {
 			if isTmuxBuffer(tok) {
 				out, err := tmux.ShowBuffer(tmuxBufferName(tok))
 				if err == nil {
-					buffers[tok] = out
 					return out
 				}
 			}
@@ -436,7 +435,7 @@ func isTmuxBuffer(name string) bool {
 	}
 	target := name[1:]
 	for _, b := range bufs {
-		if b == target {
+		if b.Name == target {
 			return true
 		}
 	}
@@ -456,7 +455,6 @@ func readBuffer(name string) (string, bool) {
 		out, err := tmux.ShowBuffer(tmuxBufferName(name))
 		if err == nil {
 			out = plugin.GetManager().RunHook("after_read", name, out)
-			buffers[name] = out
 			return out, true
 		}
 	}
@@ -485,8 +483,6 @@ func writeBuffer(name, data string) {
 	}
 	if isTmuxBuffer(name) {
 		tmux.SetBuffer(tmuxBufferName(name), data)
-		data = plugin.GetManager().RunHook("before_write", name, data)
-		buffers[name] = data
 		return
 	}
 	data = plugin.GetManager().RunHook("before_write", name, data)
@@ -1214,14 +1210,27 @@ func handleCommand(cmd string) bool {
 		var tmuxBufSet map[string]struct{}
 		if bufs, err := tmux.ListBuffers(); err == nil && len(bufs) > 0 {
 			tmuxBufSet = make(map[string]struct{}, len(bufs))
-			cmdPrintln(colorize(tmuxBufColor, "Tmux Buffers:"))
+			total := 0
 			for _, b := range bufs {
-				tmuxBufSet["%"+b] = struct{}{}
-				cmdPrintln(fmt.Sprintf("%%%s", b))
+				tmuxBufSet["%"+b.Name] = struct{}{}
+				total += b.Size
+			}
+			cmdPrintln(colorize(tmuxBufColor, fmt.Sprintf("Tmux Buffers (%d bytes):", total)))
+			for _, b := range bufs {
+				cmdPrintln(fmt.Sprintf("%%%s (%d bytes)", b.Name, b.Size))
 			}
 			forceEnter()
 		}
-		cmdPrintln(colorize(bufferColor, "Buffers:"))
+		total := 0
+		for k, v := range buffers {
+			if tmuxBufSet != nil {
+				if _, ok := tmuxBufSet[k]; ok {
+					continue
+				}
+			}
+			total += len(v)
+		}
+		cmdPrintln(colorize(bufferColor, fmt.Sprintf("Buffers (%d bytes):", total)))
 		for k, v := range buffers {
 			if tmuxBufSet != nil {
 				if _, ok := tmuxBufSet[k]; ok {
@@ -1301,11 +1310,18 @@ func handleCommand(cmd string) bool {
 		}
 		var data string
 		if fields[1] != "%null" {
-			var ok bool
-			data, ok = buffers[fields[1]]
-			if !ok {
-				cmdPrintln("unknown buffer")
-				return false
+			if isTmuxBuffer(fields[1]) {
+				out, err := tmux.ShowBuffer(tmuxBufferName(fields[1]))
+				if err == nil {
+					data = out
+				}
+			} else {
+				var ok bool
+				data, ok = buffers[fields[1]]
+				if !ok {
+					cmdPrintln("unknown buffer")
+					return false
+				}
 			}
 		}
 		tmp, err := os.CreateTemp("", "grimux-edit-*.tmp")
@@ -1331,7 +1347,11 @@ func handleCommand(cmd string) bool {
 		}
 		if b, err := os.ReadFile(tmp.Name()); err == nil {
 			if fields[1] != "%null" {
-				buffers[fields[1]] = string(b)
+				if isTmuxBuffer(fields[1]) {
+					tmux.SetBuffer(tmuxBufferName(fields[1]), string(b))
+				} else {
+					buffers[fields[1]] = string(b)
+				}
 			}
 		}
 		os.Remove(tmp.Name())

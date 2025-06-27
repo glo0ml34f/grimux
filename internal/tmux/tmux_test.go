@@ -102,7 +102,7 @@ func TestSendKeys(t *testing.T) {
 }
 
 func TestListBuffers(t *testing.T) {
-	sock, argsFile, cleanup := startFakeTmux(t, "buf1\nbuf2\n")
+	sock, argsFile, cleanup := startFakeTmux(t, "buf1|5\nbuf2|3\n")
 	defer cleanup()
 	os.Setenv("TMUX", sock+",s")
 
@@ -110,13 +110,13 @@ func TestListBuffers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListBuffers: %v", err)
 	}
-	if len(bufs) != 2 || bufs[0] != "buf1" || bufs[1] != "buf2" {
+	if len(bufs) != 2 || bufs[0].Name != "buf1" || bufs[0].Size != 5 || bufs[1].Name != "buf2" || bufs[1].Size != 3 {
 		t.Fatalf("unexpected buffers: %v", bufs)
 	}
 
 	b, _ := os.ReadFile(argsFile)
 	args := string(bytes.TrimSpace(b))
-	expected := fmt.Sprintf("-S %s list-buffers -F #{buffer_name}", sock)
+	expected := fmt.Sprintf("-S %s list-buffers -F #{buffer_name}|#{buffer_size}", sock)
 	if args != expected {
 		t.Fatalf("unexpected args: %q", args)
 	}
