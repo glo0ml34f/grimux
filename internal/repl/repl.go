@@ -194,6 +194,10 @@ var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
 var basePrompt string
 var cwdLine string
+
+// chatCtx stores recent prompts and replies to provide conversational context
+// to the LLM. It is truncated to chatLimit bytes to avoid excessively long
+// prompts.
 var chatCtx []byte
 var chatLimit = 1 << 20
 
@@ -297,7 +301,7 @@ type commandInfo struct {
 var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
-	"!set", "!prefix", "!reset", "!unset", "!get_prompt", "!session", "!recap", "!md", "!run_on", "!flow",
+	"!set", "!prefix", "!reset", "!new", "!unset", "!get_prompt", "!session", "!recap", "!md", "!run_on", "!flow",
 	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!pipe", "!encode", "!hash", "!socat", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme", "!idk",
 }
 
@@ -317,6 +321,7 @@ var commands = map[string]commandInfo{
 	"!set":        {Usage: "!set <buffer> <text>", Desc: "store text in buffer", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<text>", "text to store"}}},
 	"!prefix":     {Usage: "!prefix <buffer|file>", Desc: "set prefix from buffer or file", Params: []paramInfo{{"<buffer|file>", "buffer name or path"}}},
 	"!reset":      {Usage: "!reset", Desc: "reset session and prefix"},
+	"!new":        {Usage: "!new", Desc: "clear chat context"},
 	"!unset":      {Usage: "!unset <buffer>", Desc: "clear buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!get_prompt": {Usage: "!get_prompt", Desc: "show current prefix"},
 	"!session":    {Usage: "!session", Desc: "store session JSON in %session"},
@@ -430,6 +435,9 @@ func sanitize(s string) string {
 	}, s)
 }
 
+// appendChatHistory adds the latest user prompt and Grimux reply to the rolling
+// chat context buffer. Old entries are discarded when the size exceeds
+// chatLimit so prompts remain concise for the LLM.
 func appendChatHistory(prompt, reply string) {
 	entry := fmt.Sprintf("User: %s\nGrimux: %s\n", sanitize(prompt), sanitize(reply))
 	chatCtx = append(chatCtx, entry...)
@@ -438,6 +446,7 @@ func appendChatHistory(prompt, reply string) {
 	}
 }
 
+// getChatContext returns the current chat context as a string.
 func getChatContext() string { return string(chatCtx) }
 
 // isPaneID reports whether the buffer name refers to a tmux pane.
@@ -1539,6 +1548,9 @@ func handleCommand(cmd string) bool {
 		auditLog = nil
 		auditSummary = ""
 		cmdPrintln("session reset")
+	case "!new":
+		chatCtx = nil
+		cmdPrintln("chat context cleared")
 	case "!unset":
 		if len(fields) < 2 {
 			usage("!unset")

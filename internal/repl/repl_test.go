@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +69,44 @@ func TestNullBuffer(t *testing.T) {
 	writeBuffer("%null", "ignored")
 	if val, ok := readBuffer("%null"); !ok || val != "" {
 		t.Fatal("%null should always be empty")
+	}
+}
+
+func TestHandleCommandBasic(t *testing.T) {
+	// test !set, !prefix, !get_prompt, !unset and !new
+	chatCtx = []byte("old context")
+
+	if handleCommand("!set %foo bar") {
+		t.Fatalf("!set should not request exit")
+	}
+	if val, ok := buffers["%foo"]; !ok || val != "bar" {
+		t.Fatalf("buffer not set: %v %q", ok, val)
+	}
+
+	if handleCommand("!prefix %foo") {
+		t.Fatalf("!prefix should not request exit")
+	}
+	if askPrefix != "bar" {
+		t.Fatalf("prefix not updated: %q", askPrefix)
+	}
+
+	handleCommand("!get_prompt")
+	if !strings.Contains(buffers["%@"], "bar") {
+		t.Fatalf("!get_prompt output not captured")
+	}
+
+	if handleCommand("!unset %foo") {
+		t.Fatalf("!unset should not request exit")
+	}
+	if _, ok := buffers["%foo"]; ok {
+		t.Fatalf("buffer should be removed")
+	}
+
+	if handleCommand("!new") {
+		t.Fatalf("!new should not request exit")
+	}
+	if len(chatCtx) != 0 {
+		t.Fatalf("chat context not cleared")
 	}
 }
 

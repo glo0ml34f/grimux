@@ -118,6 +118,7 @@ Set context for the AI with a prefix so you don't need to repeat yourself.
 ```
 
 Use `!get_prompt` to show the current prefix, and `!reset` to clear it along with session state.
+Use `!new` when responses start hitting token limits to erase prior conversation context.
 
 ## Tips and Tricks
 
