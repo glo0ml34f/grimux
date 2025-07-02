@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -194,6 +195,8 @@ var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
 var basePrompt string
 var cwdLine string
+var aliasMap = map[string]string{}
+var aliasOrder []string
 
 // chatCtx stores recent prompts and replies to provide conversational context
 // to the LLM. It is truncated to chatLimit bytes to avoid excessively long
@@ -302,7 +305,7 @@ var commandOrder = []string{
 	"!observe", "!ls", "!quit", "!x", "!save",
 	"!gen", "!code", "!load", "!file", "!edit", "!run", "!cat",
 	"!set", "!prefix", "!reset", "!new", "!unset", "!get_prompt", "!session", "!recap", "!md", "!run_on", "!flow",
-	"!grep", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!pipe", "!encode", "!hash", "!socat", "!curl", "!diff", "!eat", "!view", "!rm", "!plugin", "!game", "!version", "!help", "!helpme", "!idk",
+	"!grep", "!macro", "!alias", "!model", "!pwd", "!cd", "!setenv", "!getenv", "!env", "!sum", "!rand", "!ascii", "!pipe", "!encode", "!hash", "!socat", "!curl", "!diff", "!eat", "!view", "!clip", "!rm", "!plugin", "!game", "!version", "!help", "!helpme", "!idk",
 }
 
 var commands = map[string]commandInfo{
@@ -330,6 +333,8 @@ var commands = map[string]commandInfo{
 	"!run_on":     {Usage: "!run_on <buffer> <pane> <cmd>", Desc: "run command using pane capture", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane to read"}, {"<cmd>", "command"}}},
 	"!flow":       {Usage: "!flow <buf1> [buf2 ... buf10]", Desc: "chain prompts using buffers", Params: []paramInfo{{"<buf>", "buffer name"}}},
 	"!grep":       {Usage: "!grep <regex> [buffers...]", Desc: "search buffers for regex", Params: []paramInfo{{"<regex>", "regular expression"}, {"[buffers...]", "optional buffers"}}},
+	"!macro":      {Usage: "!macro <buffer>", Desc: "run commands from buffer", Params: []paramInfo{{"<buffer>", "source buffer"}}},
+	"!alias":      {Usage: "!alias <name> <buffer>", Desc: "create macro alias", Params: []paramInfo{{"<name>", "alias name"}, {"<buffer>", "source buffer"}}},
 	"!model":      {Usage: "!model <name>", Desc: "set OpenAI model", Params: []paramInfo{{"<name>", "model name"}}},
 	"!pwd":        {Usage: "!pwd", Desc: "print working directory"},
 	"!cd":         {Usage: "!cd <dir>", Desc: "change working directory", Params: []paramInfo{{"<dir>", "directory"}}},
@@ -347,6 +352,7 @@ var commands = map[string]commandInfo{
 	"!diff":       {Usage: "!diff <left> <right> [buffer]", Desc: "diff two buffers or files", Params: []paramInfo{{"<left>", "buffer or file"}, {"<right>", "buffer or file"}, {"[buffer]", "optional output"}}},
 	"!eat":        {Usage: "!eat <buffer> <pane>", Desc: "capture full scrollback", Params: []paramInfo{{"<buffer>", "buffer name"}, {"<pane>", "pane id"}}},
 	"!view":       {Usage: "!view <buffer>", Desc: "show buffer in $VIEWER", Params: []paramInfo{{"<buffer>", "buffer name"}}},
+	"!clip":       {Usage: "!clip <buffer>", Desc: "copy buffer to clipboard", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!rm":         {Usage: "!rm <buffer>", Desc: "remove a buffer", Params: []paramInfo{{"<buffer>", "buffer name"}}},
 	"!plugin":     {Usage: "!plugin <list|unload|reload|mute> [name]", Desc: "manage plugins"},
 	"!game":       {Usage: "!game", Desc: "play a tiny game"},
@@ -933,16 +939,7 @@ func Run() error {
 	plugin.SetReadBufferFunc(func(name string) (string, bool) { return readBuffer(name) })
 	plugin.SetWriteBufferFunc(func(name, data string) { writeBuffer(name, data) })
 	plugin.SetPromptFunc(func(msg string) (string, error) {
-		rl := input.GetReadline()
-		if rl != nil {
-			fmt.Fprintln(rl.Stdout())
-			input.SetReadline(nil)
-			defer input.SetReadline(rl)
-		} else {
-			fmt.Println()
-		}
-		fmt.Fprint(os.Stdout, msg)
-		return input.ReadLine()
+		return input.ReadLinePrompt(msg)
 	})
 	plugin.SetGenCommandFunc(func(buf, prompt string) (string, error) {
 		client, err := openai.NewClient()
@@ -1236,6 +1233,10 @@ func handleCommand(cmd string) bool {
 	}
 	if strings.HasPrefix(fields[0], "!") {
 		cmdName := strings.TrimPrefix(fields[0], "!")
+		if buf, ok := aliasMap[cmdName]; ok {
+			handleCommand("!macro " + buf)
+			return false
+		}
 		if plugin.GetManager().IsCommand(cmdName) {
 			if err := plugin.GetManager().RunCommand(cmdName, fields[1:]); err != nil {
 				cmdPrintln("plugin: " + err.Error())
@@ -1721,6 +1722,40 @@ func handleCommand(cmd string) bool {
 				lineNo++
 			}
 		}
+	case "!macro":
+		if len(fields) < 2 {
+			usage("!macro")
+			return false
+		}
+		data, ok := buffers[fields[1]]
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		lines := strings.Split(strings.TrimSpace(data), "\n")
+		for _, l := range lines {
+			l = strings.TrimSpace(l)
+			if l == "" {
+				continue
+			}
+			handleCommand(l)
+		}
+	case "!alias":
+		if len(fields) < 3 {
+			usage("!alias")
+			return false
+		}
+		name := fields[1]
+		if strings.HasPrefix(name, "!") {
+			name = strings.TrimPrefix(name, "!")
+		}
+		if _, ok := commands["!"+name]; ok || plugin.GetManager().IsCommand(name) {
+			cmdPrintln("command exists")
+			return false
+		}
+		aliasMap[name] = fields[2]
+		commands["!"+name] = commandInfo{Usage: "!" + name, Desc: "user alias"}
+		aliasOrder = append(aliasOrder, "!"+name)
 	case "!model":
 		if len(fields) < 2 {
 			usage("!model")
@@ -2116,6 +2151,33 @@ func handleCommand(cmd string) bool {
 		}
 		writeBuffer("%viewer", data)
 		forceEnter()
+	case "!clip":
+		if len(fields) < 2 {
+			usage("!clip")
+			return false
+		}
+		data, ok := readBuffer(fields[1])
+		if !ok {
+			cmdPrintln("unknown buffer")
+			return false
+		}
+		var cmd *exec.Cmd
+		if runtime.GOOS == "darwin" {
+			cmd = exec.Command("pbcopy")
+		} else {
+			if _, err := exec.LookPath("xclip"); err == nil {
+				cmd = exec.Command("xclip", "-selection", "clipboard")
+			} else if _, err := exec.LookPath("wl-copy"); err == nil {
+				cmd = exec.Command("wl-copy")
+			} else {
+				cmdPrintln("no clipboard utility found")
+				return false
+			}
+		}
+		cmd.Stdin = strings.NewReader(data)
+		if err := cmd.Run(); err != nil {
+			cmdPrintln("clipboard error: " + err.Error())
+		}
 	case "!rm":
 		if len(fields) < 2 {
 			usage("!rm")
@@ -2127,6 +2189,12 @@ func handleCommand(cmd string) bool {
 			return false
 		}
 		delete(buffers, name)
+		for alias, buf := range aliasMap {
+			if buf == name {
+				delete(aliasMap, alias)
+				delete(commands, "!"+alias)
+			}
+		}
 	case "!plugin":
 		if len(fields) < 2 {
 			cmdPrintln("usage: !plugin <list|unload|reload|mute> [name]")
@@ -2188,6 +2256,13 @@ func handleCommand(cmd string) bool {
 				cmdPrintln(info.Usage + " - " + info.Desc)
 			}
 		}
+		if len(aliasOrder) > 0 {
+			cmdPrintln(colorize(bufferColor, "---- alias commands ----"))
+			for _, name := range aliasOrder {
+				info := commands[name]
+				cmdPrintln(info.Usage + " - " + info.Desc)
+			}
+		}
 	case "!helpme":
 		if len(fields) < 2 {
 			usage("!helpme")
@@ -2197,6 +2272,20 @@ func handleCommand(cmd string) bool {
 		for _, name := range commandOrder {
 			info := commands[name]
 			fmt.Fprintf(helpText, "%s - %s\n", info.Usage, info.Desc)
+		}
+		if len(pluginCommandOrder) > 0 {
+			fmt.Fprintln(helpText, "plugin commands:")
+			for _, name := range pluginCommandOrder {
+				info := commands[name]
+				fmt.Fprintf(helpText, "%s - %s\n", info.Usage, info.Desc)
+			}
+		}
+		if len(aliasOrder) > 0 {
+			fmt.Fprintln(helpText, "alias commands:")
+			for _, name := range aliasOrder {
+				info := commands[name]
+				fmt.Fprintf(helpText, "%s - %s\n", info.Usage, info.Desc)
+			}
 		}
 		client, err := openai.NewClient()
 		if err != nil {

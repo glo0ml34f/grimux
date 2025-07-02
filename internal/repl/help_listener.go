@@ -9,7 +9,25 @@ import (
 type helpListener struct{}
 
 func (h *helpListener) OnChange(line []rune, pos int, key rune) ([]rune, int, bool) {
-	if key != '?' {
+	switch key {
+	case '?':
+	case 6: // Ctrl+F
+		return []rune("!grep "), len("!grep "), true
+	case 19: // Ctrl+S
+		return []rune("!save "), len("!save "), true
+	case 15: // Ctrl+O
+		return []rune("!load "), len("!load "), true
+	case 24: // Ctrl+X
+		fmt.Println()
+		handleCommand("!x")
+		forceEnter()
+		return []rune{}, 0, true
+	case 4: // Ctrl+D
+		fmt.Println()
+		handleCommand("!quit")
+		forceEnter()
+		return []rune{}, 0, true
+	default:
 		return nil, 0, false
 	}
 	before := strings.TrimSpace(string(line[:pos]))
