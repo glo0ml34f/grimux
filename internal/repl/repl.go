@@ -164,6 +164,8 @@ type session struct {
 	HighScore int               `json:"high_score,omitempty"`
 	Audit     []string          `json:"audit,omitempty"`
 	Summary   string            `json:"summary,omitempty"`
+	ChatCtx   string            `json:"chat_ctx,omitempty"`
+	CtxLimit  int               `json:"ctx_limit,omitempty"`
 }
 
 const (
@@ -192,6 +194,8 @@ var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
 var basePrompt string
 var cwdLine string
+var chatCtx []byte
+var chatLimit = 1 << 20
 
 func captureOut(text string, newline bool) {
 	if outputCapture != nil {
@@ -425,6 +429,16 @@ func sanitize(s string) string {
 		return r
 	}, s)
 }
+
+func appendChatHistory(prompt, reply string) {
+	entry := fmt.Sprintf("User: %s\nGrimux: %s\n", sanitize(prompt), sanitize(reply))
+	chatCtx = append(chatCtx, entry...)
+	if len(chatCtx) > chatLimit {
+		chatCtx = chatCtx[len(chatCtx)-chatLimit:]
+	}
+}
+
+func getChatContext() string { return string(chatCtx) }
 
 // isPaneID reports whether the buffer name refers to a tmux pane.
 func isPaneID(name string) bool {
@@ -704,7 +718,7 @@ func sessionSnapshot() session {
 		}
 		bufCopy[k] = v
 	}
-	return session{History: history, Buffers: bufCopy, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary}
+	return session{History: history, Buffers: bufCopy, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary, ChatCtx: string(chatCtx), CtxLimit: chatLimit}
 }
 
 func loadSessionFromBuffer() {
@@ -747,6 +761,12 @@ func loadSessionFromBuffer() {
 	}
 	if s.Summary != "" {
 		auditSummary = s.Summary
+	}
+	if s.ChatCtx != "" {
+		chatCtx = []byte(s.ChatCtx)
+	}
+	if s.CtxLimit != 0 {
+		chatLimit = s.CtxLimit
 	}
 }
 
@@ -1094,7 +1114,12 @@ func Run() error {
 			if err != nil {
 				cmdPrintln(err.Error())
 			} else {
-				promptText := replaceBufferRefs(replacePaneRefs(line))
+				userPrompt := replaceBufferRefs(replacePaneRefs(line))
+				promptText := userPrompt
+				ctx := getChatContext()
+				if ctx != "" {
+					promptText = "Context:\n" + ctx + "\n---\n" + promptText
+				}
 				promptText = askPrefix + promptText
 				stop := spinner()
 				reply, err := client.SendPrompt(promptText)
@@ -1110,6 +1135,7 @@ func Run() error {
 						auditLog = append(auditLog, reply)
 						maybeSummarizeAudit()
 					}
+					appendChatHistory(userPrompt, reply)
 					forceEnter()
 				}
 			}
