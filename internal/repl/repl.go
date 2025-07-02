@@ -108,7 +108,7 @@ var Version string
 var banFile string
 
 // askPrefix is prepended to prompts when no command is given.
-const defaultAskPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Provide succinct responses formatted in Markdown: "
+const defaultAskPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Always respond to technical questions in concise Markdown, preferably with a single codeblock: "
 
 var askPrefix = defaultAskPrefix
 
@@ -1103,9 +1103,9 @@ func Run() error {
 					cprintln("openai error: " + err.Error())
 				} else {
 					respDivider()
+					buffers["%code"] = lastCodeBlock(reply)
 					renderMarkdown(reply)
 					respDivider()
-					buffers["%code"] = lastCodeBlock(reply)
 					if auditMode {
 						auditLog = append(auditLog, reply)
 						maybeSummarizeAudit()
