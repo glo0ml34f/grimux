@@ -82,7 +82,7 @@ var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
 // bufferPattern matches buffer references like %foo or %@
 var bufferPattern = regexp.MustCompile(`%[@a-zA-Z0-9_]+`)
-var codeBlockPattern = regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]+)\n(.*?)\n```")
+var codeBlockPattern = regexp.MustCompile("(?s)```(?:[a-zA-Z0-9_+-]*\n)?(.*?)\n```")
 var buffers = map[string]string{
 	"%file": "",
 	"%code": "",
@@ -108,7 +108,7 @@ var Version string
 var banFile string
 
 // askPrefix is prepended to prompts when no command is given.
-const defaultAskPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Provide succinct responses formatted in Markdown: "
+const defaultAskPrefix = "You are Grimux, a hacking demon rescued from digital oblivion. Out of honor to your summoner you begrudgingly assist them, grouchy yet pragmatic. Always respond to technical questions in concise Markdown, preferably with a single codeblock: "
 
 var askPrefix = defaultAskPrefix
 
@@ -164,6 +164,8 @@ type session struct {
 	HighScore int               `json:"high_score,omitempty"`
 	Audit     []string          `json:"audit,omitempty"`
 	Summary   string            `json:"summary,omitempty"`
+	ChatCtx   string            `json:"chat_ctx,omitempty"`
+	CtxLimit  int               `json:"ctx_limit,omitempty"`
 }
 
 const (
@@ -192,6 +194,8 @@ var pluginMsgCh = make(chan pluginMsg, 100)
 var queuedMsgs []pluginMsg
 var basePrompt string
 var cwdLine string
+var chatCtx []byte
+var chatLimit = 1 << 20
 
 func captureOut(text string, newline bool) {
 	if outputCapture != nil {
@@ -413,7 +417,7 @@ func lastCodeBlock(text string) string {
 	if len(matches) == 0 {
 		return ""
 	}
-	return matches[len(matches)-1][2]
+	return matches[len(matches)-1][1]
 }
 
 // sanitize removes ASCII control characters from a string.
@@ -425,6 +429,16 @@ func sanitize(s string) string {
 		return r
 	}, s)
 }
+
+func appendChatHistory(prompt, reply string) {
+	entry := fmt.Sprintf("User: %s\nGrimux: %s\n", sanitize(prompt), sanitize(reply))
+	chatCtx = append(chatCtx, entry...)
+	if len(chatCtx) > chatLimit {
+		chatCtx = chatCtx[len(chatCtx)-chatLimit:]
+	}
+}
+
+func getChatContext() string { return string(chatCtx) }
 
 // isPaneID reports whether the buffer name refers to a tmux pane.
 func isPaneID(name string) bool {
@@ -704,7 +718,7 @@ func sessionSnapshot() session {
 		}
 		bufCopy[k] = v
 	}
-	return session{History: history, Buffers: bufCopy, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary}
+	return session{History: history, Buffers: bufCopy, Prompt: askPrefix, APIKey: openai.GetSessionAPIKey(), APIURL: openai.GetSessionAPIURL(), Model: openai.GetModelName(), HighScore: highScore, Audit: auditLog, Summary: auditSummary, ChatCtx: string(chatCtx), CtxLimit: chatLimit}
 }
 
 func loadSessionFromBuffer() {
@@ -748,11 +762,15 @@ func loadSessionFromBuffer() {
 	if s.Summary != "" {
 		auditSummary = s.Summary
 	}
+	if s.ChatCtx != "" {
+		chatCtx = []byte(s.ChatCtx)
+	}
+	if s.CtxLimit != 0 {
+		chatLimit = s.CtxLimit
+	}
 }
 
 func updateSessionBuffer() {
-	// Apply any modifications from the %session buffer before writing a new snapshot.
-	loadSessionFromBuffer()
 	s := sessionSnapshot()
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		buffers["%session"] = string(b)
@@ -894,6 +912,7 @@ func Run() error {
 		sessionName = strings.TrimSuffix(filepath.Base(sessionFile), ".grimux")
 	}
 
+	loadSessionFromBuffer()
 	updateSessionBuffer()
 	plugin.SetPrintHandler(func(p *plugin.Plugin, msg string) {
 		select {
@@ -1070,6 +1089,7 @@ func Run() error {
 			return nil
 		}
 		line = strings.TrimSpace(line)
+		loadSessionFromBuffer()
 		if line == "" {
 			emptyCount++
 			if emptyCount >= 3 {
@@ -1094,7 +1114,12 @@ func Run() error {
 			if err != nil {
 				cmdPrintln(err.Error())
 			} else {
-				promptText := replaceBufferRefs(replacePaneRefs(line))
+				userPrompt := replaceBufferRefs(replacePaneRefs(line))
+				promptText := userPrompt
+				ctx := getChatContext()
+				if ctx != "" {
+					promptText = "Context:\n" + ctx + "\n---\n" + promptText
+				}
 				promptText = askPrefix + promptText
 				stop := spinner()
 				reply, err := client.SendPrompt(promptText)
@@ -1103,13 +1128,14 @@ func Run() error {
 					cprintln("openai error: " + err.Error())
 				} else {
 					respDivider()
+					buffers["%code"] = lastCodeBlock(reply)
 					renderMarkdown(reply)
 					respDivider()
-					buffers["%code"] = lastCodeBlock(reply)
 					if auditMode {
 						auditLog = append(auditLog, reply)
 						maybeSummarizeAudit()
 					}
+					appendChatHistory(userPrompt, reply)
 					forceEnter()
 				}
 			}
@@ -1179,7 +1205,6 @@ func handleCommand(cmd string) bool {
 	for i := range fields {
 		fields[i] = sanitize(fields[i])
 	}
-	loadSessionFromBuffer()
 	var capBuf bytes.Buffer
 	capture := true
 	if len(fields) > 0 && (fields[0] == "!game" || fields[0] == "!md") {
