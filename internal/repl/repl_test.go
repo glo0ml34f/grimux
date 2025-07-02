@@ -57,7 +57,7 @@ func TestReplaceBufferRefsOutput(t *testing.T) {
 }
 
 func TestLastCodeBlock(t *testing.T) {
-	text := "``go\nfirst\n```\ntext\n```python\nsecond\n```"
+	text := "```\nfirst\n```\ntext\n```python\nsecond\n```"
 	code := lastCodeBlock(text)
 	if code != "second" {
 		t.Fatalf("unexpected last code block: %q", code)

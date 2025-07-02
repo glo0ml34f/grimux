@@ -82,7 +82,7 @@ var panePattern = regexp.MustCompile(`\{\%(\d+)\}`)
 
 // bufferPattern matches buffer references like %foo or %@
 var bufferPattern = regexp.MustCompile(`%[@a-zA-Z0-9_]+`)
-var codeBlockPattern = regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]+)\n(.*?)\n```")
+var codeBlockPattern = regexp.MustCompile("(?s)```(?:[a-zA-Z0-9_+-]*\n)?(.*?)\n```")
 var buffers = map[string]string{
 	"%file": "",
 	"%code": "",
@@ -417,7 +417,7 @@ func lastCodeBlock(text string) string {
 	if len(matches) == 0 {
 		return ""
 	}
-	return matches[len(matches)-1][2]
+	return matches[len(matches)-1][1]
 }
 
 // sanitize removes ASCII control characters from a string.
@@ -771,8 +771,6 @@ func loadSessionFromBuffer() {
 }
 
 func updateSessionBuffer() {
-	// Apply any modifications from the %session buffer before writing a new snapshot.
-	loadSessionFromBuffer()
 	s := sessionSnapshot()
 	if b, err := json.MarshalIndent(s, "", "  "); err == nil {
 		buffers["%session"] = string(b)
@@ -914,6 +912,7 @@ func Run() error {
 		sessionName = strings.TrimSuffix(filepath.Base(sessionFile), ".grimux")
 	}
 
+	loadSessionFromBuffer()
 	updateSessionBuffer()
 	plugin.SetPrintHandler(func(p *plugin.Plugin, msg string) {
 		select {
@@ -1090,6 +1089,7 @@ func Run() error {
 			return nil
 		}
 		line = strings.TrimSpace(line)
+		loadSessionFromBuffer()
 		if line == "" {
 			emptyCount++
 			if emptyCount >= 3 {
@@ -1205,7 +1205,6 @@ func handleCommand(cmd string) bool {
 	for i := range fields {
 		fields[i] = sanitize(fields[i])
 	}
-	loadSessionFromBuffer()
 	var capBuf bytes.Buffer
 	capture := true
 	if len(fields) > 0 && (fields[0] == "!game" || fields[0] == "!md") {
