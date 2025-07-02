@@ -57,6 +57,7 @@ Use `%null` when you want to discard output entirely.
 - `!set <buffer> <text>` – store text in buffer
 - `!prefix <buffer|file>` – set prefix from buffer or file
 - `!reset` – reset session and prefix
+- `!new` – clear chat context to free tokens
 - `!unset <buffer>` – clear buffer
 - `%null` – special buffer that discards all writes and always reads empty
 - `!get_prompt` – show current prefix
