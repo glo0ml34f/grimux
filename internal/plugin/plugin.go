@@ -34,6 +34,7 @@ type Plugin struct {
 	shut     *lua.LFunction
 	commands map[string]*lua.LFunction
 	hooks    map[string][]*lua.LFunction
+	allowed  map[string]bool
 }
 
 // Manager keeps track of loaded plugins and the directory to load from.
@@ -157,6 +158,25 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				return 0
 			}
 			p.Info = inf
+			if L.GetTop() >= 3 {
+				tbl := L.CheckTable(3)
+				var funcs []string
+				tbl.ForEach(func(_, v lua.LValue) {
+					funcs = append(funcs, v.String())
+				})
+				if promptFn != nil && len(funcs) > 0 {
+					msg := fmt.Sprintf("Plugin %s wants API functions %s. Allow? [y/N] ", inf.Name, strings.Join(funcs, ","))
+					resp, err := promptFn(msg)
+					if err != nil || strings.ToLower(strings.TrimSpace(resp)) != "y" {
+						L.RaiseError("api denied")
+						return 0
+					}
+				}
+				p.allowed = map[string]bool{}
+				for _, f := range funcs {
+					p.allowed[f] = true
+				}
+			}
 			L.Push(lua.LString(p.Handle))
 			return 1
 		},
@@ -164,6 +184,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			handle := L.CheckString(1)
 			if handle != p.Handle {
 				L.RaiseError("invalid handle")
+				return 0
+			}
+			if p.allowed != nil && !p.allowed["print"] {
+				L.RaiseError("print not allowed")
 				return 0
 			}
 			msg := L.CheckString(2)
@@ -203,6 +227,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				L.RaiseError("invalid handle")
 				return 0
 			}
+			if p.allowed != nil && !p.allowed["read"] {
+				L.RaiseError("read not allowed")
+				return 0
+			}
 			name := L.CheckString(2)
 			if readBufFn == nil {
 				L.Push(lua.LNil)
@@ -222,6 +250,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				L.RaiseError("invalid handle")
 				return 0
 			}
+			if p.allowed != nil && !p.allowed["write"] {
+				L.RaiseError("write not allowed")
+				return 0
+			}
 			name := L.CheckString(2)
 			data := L.CheckString(3)
 			if writeBufFn != nil {
@@ -236,6 +268,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				L.RaiseError("invalid handle")
 				return 0
 			}
+			if p.allowed != nil && !p.allowed["prompt"] {
+				L.RaiseError("prompt not allowed")
+				return 0
+			}
 			name := L.CheckString(2)
 			msg := L.CheckString(3)
 			if promptFn == nil {
@@ -246,6 +282,14 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			if err != nil {
 				L.RaiseError("prompt: %v", err)
 				return 0
+			}
+			if readBufFn != nil {
+				resp = bufferPattern.ReplaceAllStringFunc(resp, func(tok string) string {
+					if val, ok := readBufFn(tok); ok {
+						return val
+					}
+					return tok
+				})
 			}
 			if writeBufFn != nil {
 				writeBufFn(pluginBufferName(p.Info.Name, name), resp)
@@ -307,6 +351,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			handle := L.CheckString(1)
 			if handle != p.Handle {
 				L.RaiseError("invalid handle")
+				return 0
+			}
+			if p.allowed != nil && !p.allowed["http"] {
+				L.RaiseError("http not allowed")
 				return 0
 			}
 			method := strings.ToUpper(L.CheckString(2))
@@ -403,6 +451,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				L.RaiseError("invalid handle")
 				return 0
 			}
+			if p.allowed != nil && !p.allowed["gen"] {
+				L.RaiseError("gen not allowed")
+				return 0
+			}
 			buf := L.CheckString(2)
 			prompt := L.CheckString(3)
 			if genCmdFn == nil {
@@ -426,6 +478,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 				L.RaiseError("invalid handle")
 				return 0
 			}
+			if p.allowed != nil && !p.allowed["socat"] {
+				L.RaiseError("socat not allowed")
+				return 0
+			}
 			buf := L.CheckString(2)
 			args := make([]string, 0, L.GetTop()-2)
 			for i := 3; i <= L.GetTop(); i++ {
@@ -447,6 +503,10 @@ func (m *Manager) Load(path string) (*Plugin, error) {
 			handle := L.CheckString(1)
 			if handle != p.Handle {
 				L.RaiseError("invalid handle")
+				return 0
+			}
+			if p.allowed != nil && !p.allowed["pipe"] {
+				L.RaiseError("pipe not allowed")
 				return 0
 			}
 			buf := L.CheckString(2)

@@ -65,6 +65,9 @@ Use `%null` when you want to discard output entirely.
 - `!run_on <buffer> <pane> <cmd>` – run a command on another pane and store its output
 - `!flow <buf1> [buf2 ... buf10]` – chain prompts using buffers
 - `!grep <regex> [buffers...]` – search buffers for regex
+- `!macro <buffer>` – run commands from a buffer
+- `!alias <name> <buffer>` – create alias that runs the macro
+- `!clip <buffer>` – copy buffer to the clipboard
 - `!model <name>` – set OpenAI model
 - `!pwd` – print working directory
 - `!cd <dir>` – change working directory
@@ -99,6 +102,11 @@ any command to insert buffer contents or `{%1}` to embed a pane capture.
 - **Ctrl+R** – reverse search history
 - **Escape** – clear the line and start a command with `!`
 - **Ctrl+G** – instantly start a command with `!`
+- **Ctrl+F** – begin a `!grep` command
+- **Ctrl+S** – begin a `!save` command
+- **Ctrl+O** – begin a `!load` command
+- **Ctrl+X** – immediately run `!x`
+- **Ctrl+D** – immediately run `!quit`
 - **?** – inline parameter help or `!help` when pressed on an empty line
 
 ## Environment

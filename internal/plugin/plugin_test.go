@@ -26,7 +26,7 @@ func TestHTTP(t *testing.T) {
 function init(h)
   local info = {name="plug", grimux="0.1.0", version="0.1.0"}
   local json = "{\"name\":\"plug\",\"grimux\":\"0.1.0\",\"version\":\"0.1.0\"}"
-  plugin.register(h, json)
+  plugin.register(h, json, {"http"})
   local resp, status = plugin.http(h, "GET", "%s")
   got_ok = resp.ok
   got_status = status
@@ -58,7 +58,7 @@ func TestBuffersAndHook(t *testing.T) {
 function init(h)
   local info = {name="plug", grimux="0.1.0", version="0.1.0"}
   local json = '{"name":"plug","grimux":"0.1.0","version":"0.1.0"}'
-  plugin.register(h, json)
+  plugin.register(h, json, {"write","hook","read","prompt"})
 end
 
 function run(h)
@@ -119,7 +119,7 @@ func TestCommandRun(t *testing.T) {
 function init(h)
   local info = {name="plug", grimux="0.1.0", version="0.1.0"}
   local json = '{"name":"plug","grimux":"0.1.0","version":"0.1.0"}'
-  plugin.register(h, json)
+  plugin.register(h, json, {"command"})
   plugin.command(h, "doit")
 end
 
@@ -160,7 +160,7 @@ func TestCommandArgBuffer(t *testing.T) {
 function init(h)
   local info = {name="pbuf", grimux="0.1.0", version="0.1.0"}
   local json = '{"name":"pbuf","grimux":"0.1.0","version":"0.1.0"}'
-  plugin.register(h, json)
+  plugin.register(h, json, {"command"})
   plugin.command(h, "echo")
 end
 
@@ -197,7 +197,7 @@ func TestHookPrintInfo(t *testing.T) {
 function init(h)
   local info = {name="phook", grimux="0.1.0", version="0.1.0"}
   local json = '{"name":"phook","grimux":"0.1.0","version":"0.1.0"}'
-  plugin.register(h, json)
+  plugin.register(h, json, {"hook","write"})
   plugin.hook(h, "before_write", function(b,v) return v end)
 end
 `
@@ -223,7 +223,7 @@ func TestBeforeWriteHook(t *testing.T) {
 function init(h)
   local info = {name="pre", grimux="0.1.0", version="0.1.0"}
   local json = '{"name":"pre","grimux":"0.1.0","version":"0.1.0"}'
-  plugin.register(h, json)
+  plugin.register(h, json, {"hook","write"})
 end
 
 function run(h)
@@ -260,7 +260,7 @@ func TestHasHook(t *testing.T) {
 function init(h)
   local info = {name="hh", grimux="0.1.0", version="0.1.0"}
   local json = '{"name":"hh","grimux":"0.1.0","version":"0.1.0"}'
-  plugin.register(h, json)
+  plugin.register(h, json, {"hook"})
   plugin.hook(h, "before_openai", function(b,v) return v end)
 end
 `
@@ -290,7 +290,7 @@ func TestManyHooks(t *testing.T) {
 function init(h)
   local info = {name="many", grimux="0.1.0", version="0.1.0"}
   local json = '{"name":"many","grimux":"0.1.0","version":"0.1.0"}'
-  plugin.register(h, json)
+  plugin.register(h, json, {"hook"})
   for i=1,20 do
     plugin.hook(h, "h"..i, function(b,v) return v end)
   end
@@ -322,7 +322,7 @@ func TestPluginGen(t *testing.T) {
 	luaFile := filepath.Join(dir, "plug.lua")
 	code := `
 function init(h)
-  plugin.register(h, '{"name":"aiplug","grimux":"0.1.0","version":"0.1.0"}')
+  plugin.register(h, '{"name":"aiplug","grimux":"0.1.0","version":"0.1.0"}', {"gen"})
 end
 function run(h)
   plugin.gen(h, "out", "hi")
@@ -360,7 +360,7 @@ func TestPluginSocat(t *testing.T) {
 	luaFile := filepath.Join(dir, "plug.lua")
 	code := `
 function init(h)
-  plugin.register(h, '{"name":"soc","grimux":"0.1.0","version":"0.1.0"}')
+  plugin.register(h, '{"name":"soc","grimux":"0.1.0","version":"0.1.0"}', {"socat","write"})
 end
 function run(h)
   plugin.write(h, "in", "hello")
