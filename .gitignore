@@ -33,3 +33,7 @@ go.work.sum
 
 *.grimux
 grimux
+
+# Editor swap files
+*.swp
+*.swo
